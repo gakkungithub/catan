@@ -23,6 +23,7 @@ def main():
                     continue
                 if board.pick_way_pos_from_mouse(event.pos):
                     continue
+                board.start_dice_rolling(event.pos)
 
         board.draw()
 

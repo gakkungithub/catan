@@ -8,6 +8,7 @@ import numpy as np
 import math
 from image_manager import ImageManager
 from card import HandCards
+from dices import Dices
 
 class BoardState(Enum):
     SETFIRSTTOWN = 0
@@ -116,6 +117,9 @@ class Board:
                                                       HandCards(pygame.Rect(10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[2], "Player 3"),
                                                       HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[3], "Player 4"))
 
+        # サイコロ * 2
+        self.dices = Dices(pygame.Rect(self.SCREEN_WIDTH*2/5,self.SCREEN_HEIGHT*2/5,self.SCREEN_WIDTH*1/5,self.SCREEN_HEIGHT*1/5))
+        
     def get_first_potential_town_pos(self):
         """最初に置ける開拓地の場所を取得"""
         potential_town_pos: set[tuple[int,int]] = set()
@@ -184,11 +188,43 @@ class Board:
             # この関数についても、プレイヤーによって表示を切り替えられるようにする
             self.draw_road(edge, player_index)
 
+        # 現在の行動が最初の道配置であるならそれに対する表示を行う
         if self.crnt_action in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.ACTION):
             for edge in self.player_list[self.crnt_player_index].potential_road_pos:
                 self.draw_potential_road(edge)
             for edge in self.player_list[self.crnt_player_index].potential_ship_pos:
                 self.draw_potential_road(edge)
+
+        # サイコロの描画
+        if self.crnt_action == BoardState.ROLLDICE:
+            # 7が出た場合
+            if (dices_result := self.dices.draw(self.screen)) == 7:
+                pass
+            elif dices_result:
+                hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
+                resources = [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]
+                for space_index, space_pos in hit_space_pos:
+                    # ここは関数化するか後で考える
+                    for vx, vy in self.VERTEX_DIR:
+                        if (player_index := self.towns_already_set.get((space_pos[0]+vx, space_pos[1]+vy))) is not None:
+                            resource = self.resources[space_index]
+                            if resource == "tree":
+                                resources[player_index][0] += 1
+                            elif resource == "brick":
+                                resources[player_index][1] += 1
+                            elif resource == "sheep":
+                                resources[player_index][2] += 1
+                            elif resource == "wheat":
+                                resources[player_index][3] += 1
+                            elif resource == "ore":
+                                resources[player_index][4] += 1
+                            # 金脈の場合
+                            else:
+                                pass
+                for i, resources_by_player in enumerate(resources):
+                    self.hand_cards_by_player[i].add_resources(resources_by_player)
+
+                self.crnt_action = BoardState.ACTION
 
         # 持ち札の描画
         for hand_cards in self.hand_cards_by_player:
@@ -397,6 +433,12 @@ class Board:
             return True
         
         return False
+
+    def start_dice_rolling(self, mouse_pos: tuple[int,int]):
+        if self.crnt_action != BoardState.ROLLDICE:
+            return
+        
+        self.dices.start_dice_rolling(mouse_pos)
 
     def update_potential_town_pos(self):
         self.player_list[self.crnt_player_index].potential_town_pos.difference_update(self.towns_already_set)
