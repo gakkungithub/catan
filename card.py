@@ -60,3 +60,6 @@ class HandCards:
             self.surface.blit(surf, surf.get_rect(topleft=(10+50*i, 170)))
 
         screen.blit(self.surface, (self.x, self.y))
+
+    def add_resources(self, resources_to_add: list[int]):
+        self.resources = [i+j for i, j in zip(self.resources, resources_to_add)]

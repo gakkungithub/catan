@@ -78,7 +78,6 @@ class Board:
             (-4,6),(0,6),(4,6)
         )
 
-
         self.resources, self.numbers = self.generate_resources_and_numbers()
         self.vertex_details, self.edge_details = self.generate_vertex_and_edge_details()
 
@@ -157,7 +156,7 @@ class Board:
         for i in range(len(self.numbers)):
             sx, sy = self.space_pos[i]
             for dindex, (dx, dy) in enumerate(self.VERTEX_DIR):
-                vertex_details[(sx+dx, sy+dy)].add(self.resources[i])
+                vertex_details[(sx+dx, sy+dy)].add(i)
                 ex, ey = self.VERTEX_DIR[(dindex+1)%6]
                 edge: tuple[tuple[int,int], tuple[int,int]] = tuple(sorted(((sx+dx, sy+dy), (sx+ex, sy+ey)), key=lambda x: x[1]))
                 if self.resources[i] == "sea":
@@ -328,6 +327,23 @@ class Board:
                 pass
             elif self.crnt_action == BoardState.SETSECONDTOWN:
                 self.set_second_town(best_pos)
+                resources: list[int] = [0,0,0,0,0]
+                for space_index in self.vertex_details[best_pos]:
+                    if (resource := self.resources[space_index]) not in ("dessert", "sea"):
+                        if resource == "tree":
+                            resources[0] += 1
+                        elif resource == "brick":
+                            resources[1] += 1
+                        elif resource == "sheep":
+                            resources[2] += 1
+                        elif resource == "wheat":
+                            resources[3] += 1
+                        elif resource == "ore":
+                            resources[4] += 1
+                        # 金脈の場合
+                        else:
+                            pass
+                self.hand_cards_by_player[self.crnt_player_index].add_resources(resources)
             else:
                 self.set_first_town(best_pos)
             return True
@@ -381,7 +397,6 @@ class Board:
             return True
         
         return False
-
 
     def update_potential_town_pos(self):
         self.player_list[self.crnt_player_index].potential_town_pos.difference_update(self.towns_already_set)
