@@ -229,6 +229,8 @@ class Board:
                     self.hand_cards_by_player[i].add_resources(resources_by_player)
 
                 self.crnt_action = BoardState.ACTION
+                self.hand_cards_by_player[self.crnt_player_index].set_possible_action()
+
 
         # 持ち札の描画
         for hand_cards in self.hand_cards_by_player:
@@ -436,6 +438,12 @@ class Board:
         
         return False
 
+    def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
+        if self.crnt_action != BoardState.ACTION:
+            return
+        
+        self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)
+
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
         if self.crnt_action != BoardState.ROLLDICE:
             return
@@ -466,7 +474,6 @@ class Board:
                             player.potential_road_pos.remove(edge)
                 
             player.potential_town_pos.difference_update(town_pos_cannot_put)
-
 
     def set_first_town(self, best_pos: tuple[int,int]):
         self.set_town(best_pos, self.player_list[self.crnt_player_index].player_index)

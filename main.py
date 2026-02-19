@@ -24,6 +24,7 @@ def main():
                 if board.pick_way_pos_from_mouse(event.pos):
                     continue
                 board.start_dice_rolling(event.pos)
+                # board.pick_action_from_mouse(event.pos)
 
         board.draw()
 
