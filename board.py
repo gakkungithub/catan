@@ -16,7 +16,9 @@ class BoardState(Enum):
     SETSECONDTOWN = 2
     SETSECONDROAD = 3
     ROLLDICE = 4
-    ACTION = 5
+    DISCARD = 5
+    THIEF = 6
+    ACTION = 7
 
 class Board:
     VERTEX_DIR = ((0,-2),(2,-1),(2,1),(0,2),(-2,1),(-2,-1))
@@ -118,7 +120,7 @@ class Board:
                                                       HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[3], "Player 4"))
 
         # サイコロ * 2
-        self.dices = Dices(pygame.Rect(self.SCREEN_WIDTH*2/5,self.SCREEN_HEIGHT*2/5,self.SCREEN_WIDTH*1/5,self.SCREEN_HEIGHT*1/5))
+        self.dices = Dices(pygame.Rect(self.SCREEN_WIDTH*5/12,self.SCREEN_HEIGHT*5/12,self.SCREEN_WIDTH*1/6,self.SCREEN_HEIGHT*1/6))
         
     def get_first_potential_town_pos(self):
         """最初に置ける開拓地の場所を取得"""
@@ -199,7 +201,9 @@ class Board:
         if self.crnt_action == BoardState.ROLLDICE:
             # 7が出た場合
             if (dices_result := self.dices.draw(self.screen)) == 7:
-                pass
+                
+                self.crnt_action = BoardState.THIEF
+
             elif dices_result:
                 hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
                 resources = [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]
@@ -331,10 +335,9 @@ class Board:
 
     # 道を設置
     def set_road(self, edge: tuple[tuple[int,int], tuple[int,int]], player_index: int):
-        if edge[0][1] < edge[1][1]:
-            self.ways_already_set[edge] = player_index
-        else:
-            self.ways_already_set[(edge[1], edge[0])] = player_index
+        self.ways_already_set[edge] = player_index
+        for player in self.player_list:
+            player.potential_road_pos.discard(edge)
 
     # 開拓地を設置
     def set_town(self, pos: tuple[int,int], player_index: int):
@@ -415,7 +418,6 @@ class Board:
         
         if best_edge is not None:
             self.set_road(best_edge, self.crnt_player_index)
-            self.player_list[self.crnt_player_index].potential_road_pos.remove(best_edge)
             self.update_potential_ways_from_vertex(best_edge[0], "road")
             self.update_potential_ways_from_vertex(best_edge[1], "road")
             if self.crnt_action == BoardState.SETFIRSTROAD:
@@ -443,15 +445,40 @@ class Board:
     def update_potential_town_pos(self):
         self.player_list[self.crnt_player_index].potential_town_pos.difference_update(self.towns_already_set)
 
+    def delete_potential_town_pos(self, vertex: tuple[int,int]):
+        # この頂点からはY字状に辺が伸びている
+        if vertex[1] % 3 == 2:
+            town_pos_cannot_put: set[tuple[int,int]] = {vertex,(vertex[0]-2, vertex[1]-1),(vertex[0], vertex[1]+2),(vertex[0]+2, vertex[1]-1)}
+        # この頂点からは上下逆さのY字状に辺が伸びている
+        elif vertex[1] % 3 == 1:
+            town_pos_cannot_put: set[tuple[int,int]] = {vertex,(vertex[0]-2, vertex[1]+1),(vertex[0], vertex[1]-2),(vertex[0]+2, vertex[1]+1)}
+        # 念の為
+        else:
+            return
+        
+        for player in self.player_list:
+            if player.player_index != self.crnt_player_index:
+                for vertex_adjacent in town_pos_cannot_put:
+                    if (edge := tuple(sorted((vertex, vertex_adjacent), key=lambda x: x[1]))) in self.ways_already_set:
+                        continue
+                    if edge in player.potential_road_pos:
+                        if not any(vertex_adjacent == e[0] or vertex_adjacent == e[1] for e in self.ways_already_set.keys()):
+                            player.potential_road_pos.remove(edge)
+                
+            player.potential_town_pos.difference_update(town_pos_cannot_put)
+
+
     def set_first_town(self, best_pos: tuple[int,int]):
         self.set_town(best_pos, self.player_list[self.crnt_player_index].player_index)
-        self.update_potential_town_pos()
+        self.hand_cards_by_player[self.crnt_player_index].town_points += 1
+        self.delete_potential_town_pos(best_pos)
         self.update_potential_ways_from_vertex(best_pos, "town")
         self.crnt_action = BoardState.SETFIRSTROAD
 
     def set_second_town(self, best_pos: tuple[int,int]):
         self.set_town(best_pos, self.player_list[self.crnt_player_index].player_index)
-        self.update_potential_town_pos()
+        self.hand_cards_by_player[self.crnt_player_index].town_points += 1
+        self.delete_potential_town_pos(best_pos)
         self.update_potential_ways_from_vertex(best_pos, "town")
         self.crnt_action = BoardState.SETSECONDROAD
 

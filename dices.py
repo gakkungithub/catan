@@ -45,14 +45,14 @@ class Dices:
                 self.crnt_number_blue = random.choice(self.numbers)
 
         # 赤サイコロの描画
-        pygame.draw.rect(self.surface, self.DICE_RED_COLOR, pygame.Rect(10,10,40,40))
+        pygame.draw.rect(self.surface, self.DICE_RED_COLOR, pygame.Rect(self.width//2-50,self.height//2-20,40,40))
         dice_text_red = self.font.render(str(self.crnt_number_red), True, (255,255,255))
-        self.surface.blit(dice_text_red, dice_text_red.get_rect(center=(30,self.height//2)))
+        self.surface.blit(dice_text_red, dice_text_red.get_rect(center=(self.width//2-30,self.height//2)))
         
         # 青サイコロの描画
-        pygame.draw.rect(self.surface, self.DICE_BLUE_COLOR, pygame.Rect(self.width-50,10,40,40))
+        pygame.draw.rect(self.surface, self.DICE_BLUE_COLOR, pygame.Rect(self.width//2+10,self.height//2-20,40,40))
         dice_text_blue = self.font.render(str(self.crnt_number_blue), True, (255,255,255))
-        self.surface.blit(dice_text_blue, dice_text_blue.get_rect(center=(self.width-30,self.height//2)))
+        self.surface.blit(dice_text_blue, dice_text_blue.get_rect(center=(self.width//2+30,self.height//2)))
 
         screen.blit(self.surface, (self.x, self.y))
 
