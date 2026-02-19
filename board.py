@@ -9,16 +9,18 @@ import math
 from image_manager import ImageManager
 from card import HandCards
 from dices import Dices
+from card import ActionType
 
 class BoardState(Enum):
     SETFIRSTTOWN = 0
     SETFIRSTROAD = 1
     SETSECONDTOWN = 2
     SETSECONDROAD = 3
-    ROLLDICE = 4
-    DISCARD = 5
-    THIEF = 6
-    ACTION = 7
+    SETROAD = 4
+    ROLLDICE = 5
+    DISCARD = 6
+    THIEF = 7
+    ACTION = 8
 
 class Board:
     VERTEX_DIR = ((0,-2),(2,-1),(2,1),(0,2),(-2,1),(-2,-1))
@@ -154,7 +156,7 @@ class Board:
         return resources, numbers
     
     def generate_vertex_and_edge_details(self, isSea: bool = False):
-        """頂点の情報を取得する(どのマスに属しているかをインデックスを取得できるようにする)"""
+        """頂点と辺の情報を取得する(どのマスに属しているかをインデックスを取得できるようにする)"""
         vertex_details: defaultdict[tuple[int,int], set[int]] = defaultdict(set)
         edge_details: defaultdict[tuple[tuple[int,int], tuple[int,int]], dict[str, bool]] = defaultdict(lambda: {"road": False, "ship": False})
         edge_check_count: defaultdict[tuple[tuple[int,int], tuple[int,int]], int] = defaultdict(int)
@@ -191,7 +193,7 @@ class Board:
             self.draw_road(edge, player_index)
 
         # 現在の行動が最初の道配置であるならそれに対する表示を行う
-        if self.crnt_action in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.ACTION):
+        if self.crnt_action in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.SETROAD):
             for edge in self.player_list[self.crnt_player_index].potential_road_pos:
                 self.draw_potential_road(edge)
             for edge in self.player_list[self.crnt_player_index].potential_ship_pos:
@@ -392,7 +394,7 @@ class Board:
         return False
     
     def pick_way_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action not in (BoardState.ACTION, BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD):
+        if self.crnt_action not in (BoardState.SETROAD, BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD):
             return False
         
         best_edge = None
@@ -429,11 +431,18 @@ class Board:
                     self.crnt_action = BoardState.SETFIRSTTOWN
                     self.crnt_player_index += 1 
             elif self.crnt_action == BoardState.SETSECONDROAD:
+                self.player_list[self.crnt_player_index].potential_town_pos = set()
+                self.update_potential_town_pos(best_edge[0])
+                self.update_potential_town_pos(best_edge[1])
                 if self.crnt_player_index == 0:
                     self.crnt_action = BoardState.ROLLDICE
                 else:
                     self.crnt_action = BoardState.SETSECONDTOWN
-                    self.crnt_player_index -= 1 
+                    self.crnt_player_index -= 1
+            elif self.crnt_action == BoardState.SETROAD:
+                self.update_potential_town_pos(best_edge[0])
+                self.update_potential_town_pos(best_edge[1])
+                self.crnt_action = BoardState.ACTION
             return True
         
         return False
@@ -442,16 +451,18 @@ class Board:
         if self.crnt_action != BoardState.ACTION:
             return
         
-        self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)
+        if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
+            if action_type == ActionType.ROADBUILD:
+                self.crnt_action = BoardState.SETROAD
+            elif action_type == ActionType.QUIT:
+                self.crnt_player_index = (self.crnt_player_index + 1) % 4
+                self.crnt_action = BoardState.ROLLDICE
 
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
         if self.crnt_action != BoardState.ROLLDICE:
             return
         
         self.dices.start_dice_rolling(mouse_pos)
-
-    def update_potential_town_pos(self):
-        self.player_list[self.crnt_player_index].potential_town_pos.difference_update(self.towns_already_set)
 
     def delete_potential_town_pos(self, vertex: tuple[int,int]):
         # この頂点からはY字状に辺が伸びている
@@ -489,8 +500,30 @@ class Board:
         self.update_potential_ways_from_vertex(best_pos, "town")
         self.crnt_action = BoardState.SETSECONDROAD
 
+    def update_potential_town_pos(self, vertex: tuple[int,int]):
+        """現在設置した道に含まれる座標について、その座標と隣り合う座標全てで開拓地または都市がないなら、開拓地を置ける場所候補として登録する"""
+        if vertex in self.towns_already_set:
+            return
+        
+        # この頂点からはY字状に辺が伸びている
+        if vertex[1] % 3 == 2:
+            if ((vertex[0]-2, vertex[1]-1) in self.towns_already_set or
+                (vertex[0], vertex[1]+2) in self.towns_already_set or
+                (vertex[0]+2, vertex[1]-1) in self.towns_already_set):
+                return
+        # この頂点からは上下逆さのY字状に辺が伸びている
+        elif vertex[1] % 3 == 1:
+            if ((vertex[0]-2, vertex[1]+1) in self.towns_already_set or
+                (vertex[0], vertex[1]+2) in self.towns_already_set or
+                (vertex[0]+2, vertex[1]+1) in self.towns_already_set):
+                return
+        else:
+            return
+        
+        self.player_list[self.crnt_player_index].potential_town_pos.add(vertex)
+
     def update_potential_ways_from_vertex(self, vertex: tuple[int,int], object_type: str):
-        """現在設置した道または開拓地から道を延ばせる辺を新たに取得する"""
+        """現在設置した道または開拓地から道を伸ばせる辺を新たに取得する"""
         # この頂点からはY字状に辺が伸びている
         if vertex[1] % 3 == 2:
             # まずは左上の頂点との辺を確認

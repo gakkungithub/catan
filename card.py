@@ -22,10 +22,11 @@ class ActionType(IntEnum):
     CITYBUILD = 2
     DEVELOPMENT = 3
     TRADE = 4
+    QUIT = 5
 
 class HandCards:
     FONT_SIZE = 24
-    BUTTON_FONT_SIZE = 10
+    BUTTON_FONT_SIZE = 8
     BUTTON_BG_COLOR = (100,100,100)
     BUTTON_RADIUS = 5
 
@@ -52,8 +53,8 @@ class HandCards:
 
         self.color = color
 
-        self.actions = (self.get_button_rect("NEW ROAD", (50,30)), self.get_button_rect("NEW TOWN", (50,30+self.BUTTON_FONT_SIZE+25)), self.get_button_rect("NEW CITY", (50,30+(self.BUTTON_FONT_SIZE+25)*2)),
-                        self.get_button_rect("DEVELOPMENT", (50,30+(self.BUTTON_FONT_SIZE+25)*3)), self.get_button_rect("TRADE", (50,30+(self.BUTTON_FONT_SIZE+25)*4)))
+        self.actions = (self.get_button_rect("NEW ROAD", (50,15)), self.get_button_rect("NEW TOWN", (50,15+self.BUTTON_FONT_SIZE+25)), self.get_button_rect("NEW CITY", (50,15+(self.BUTTON_FONT_SIZE+25)*2)),
+                        self.get_button_rect("DEVELOPMENT", (50,15+(self.BUTTON_FONT_SIZE+25)*3)), self.get_button_rect("TRADE", (50,15+(self.BUTTON_FONT_SIZE+25)*4)), self.get_button_rect("QUIT", (50,15+(self.BUTTON_FONT_SIZE+25)*5)))
         self.possible_actions: list[tuple[int, tuple[pygame.Surface, pygame.Rect, pygame.Rect]]] = []
 
         self.card_num_to_be_discarded = 0
@@ -114,19 +115,33 @@ class HandCards:
 
     def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
         local_pos = (mouse_pos[0]-self.x-self.card_width, mouse_pos[1]-self.y)
-        
+
         for i, (_, _, button_rect) in self.possible_actions:
             if button_rect.collidepoint(local_pos):
                 if i == ActionType.ROADBUILD:
-                    print("build road")
+                    self.resources[ResourceCardType.TREE] -= 1
+                    self.resources[ResourceCardType.BRICK] -= 1
                 elif i == ActionType.TOWNBUILD:
-                    print("build town")
+                    self.resources[ResourceCardType.TREE] -= 1
+                    self.resources[ResourceCardType.BRICK] -= 1
+                    self.resources[ResourceCardType.SHEEP] -= 1
+                    self.resources[ResourceCardType.WHEAT] -= 1
                 elif i == ActionType.CITYBUILD:
-                    print("build city")
+                    self.resources[ResourceCardType.WHEAT] -= 1
+                    self.resources[ResourceCardType.ORE] -= 1
                 elif i == ActionType.DEVELOPMENT:
-                    print("development")
-                else:
+                    self.resources[ResourceCardType.SHEEP] -= 1
+                    self.resources[ResourceCardType.WHEAT] -= 1
+                    self.resources[ResourceCardType.ORE] -= 1
+                elif i == ActionType.TRADE:
                     print("trade")
+                else:
+                    print("quit")
+                    self.crnt_action = "normal"
+                    return i
+                self.set_possible_action()
+                return i
+        return None
 
     def set_possible_action(self):
         self.possible_actions = []
@@ -145,7 +160,7 @@ class HandCards:
         # 交渉
         if sum(self.resources):
             self.possible_actions.append((ActionType.TRADE, self.actions[ActionType.TRADE])) 
-
+        self.possible_actions.append((ActionType.QUIT, self.actions[ActionType.QUIT]))
         self.crnt_action = "action" if len(self.possible_actions) else "normal"
         
 
