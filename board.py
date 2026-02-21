@@ -9,18 +9,20 @@ import math
 from image_manager import ImageManager
 from card import HandCards
 from dices import Dices
-from card import ActionType
+from card import ResourceCardType, ActionType
 
 class BoardState(Enum):
     SETFIRSTTOWN = 0
     SETFIRSTROAD = 1
     SETSECONDTOWN = 2
     SETSECONDROAD = 3
-    SETROAD = 4
-    ROLLDICE = 5
-    DISCARD = 6
-    THIEF = 7
-    ACTION = 8
+    SETTOWN = 4
+    SETROAD = 5
+    ROLLDICE = 6
+    DISCARD = 7
+    THIEF = 8
+    STEAL = 9
+    ACTION = 10
 
 class Board:
     VERTEX_DIR = ((0,-2),(2,-1),(2,1),(0,2),(-2,1),(-2,-1))
@@ -39,6 +41,7 @@ class Board:
 
     BRIDGE_THICKNESS = 6
     VERTEX_RADIUS = 8
+    NUMBER_CHIP_RADIUS = 20
     LINE_CLICK_RANGE = 6
     LINE_WIDTH = 2
 
@@ -83,8 +86,8 @@ class Board:
             (-4,6),(0,6),(4,6)
         )
 
-        self.resources, self.numbers = self.generate_resources_and_numbers()
-        self.vertex_details, self.edge_details = self.generate_vertex_and_edge_details()
+        self.resources, self.numbers = self.set_resources_and_numbers()
+        self.vertex_details, self.edge_details = self.get_board_details()
 
         self.ports = {
             ((0,-8),(-2,-7)): ("ore",0),
@@ -111,9 +114,7 @@ class Board:
 
         self.crnt_player_index = 0
 
-        self.player_list: list[HumanPlayer] = []
-        for i in range(4):
-            self.player_list.append(HumanPlayer(i, self.get_first_potential_town_pos()))
+        self.player_list: list[HumanPlayer] = [HumanPlayer(i, self.get_first_possible_town_pos()) for i in range(4)]
 
         # 名前は後で変えられるようにする
         self.hand_cards_by_player: tuple[HandCards] = (HandCards(pygame.Rect(10, 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[0], "Player 1"),
@@ -124,13 +125,13 @@ class Board:
         # サイコロ * 2
         self.dices = Dices(pygame.Rect(self.SCREEN_WIDTH*5/12,self.SCREEN_HEIGHT*5/12,self.SCREEN_WIDTH*1/6,self.SCREEN_HEIGHT*1/6))
         
-    def get_first_potential_town_pos(self):
+    def get_first_possible_town_pos(self):
         """最初に置ける開拓地の場所を取得"""
-        potential_town_pos: set[tuple[int,int]] = set()
+        possible_town_pos: set[tuple[int,int]] = set()
         for pos in self.space_pos:
             for dx, dy in self.VERTEX_DIR:
-                potential_town_pos.add((pos[0]+dx, pos[1]+dy))
-        return potential_town_pos - set(self.towns_already_set.keys())
+                possible_town_pos.add((pos[0]+dx, pos[1]+dy))
+        return possible_town_pos - set(self.towns_already_set.keys())
 
     def to_screen(self, pos: tuple[int,int]):
         """ワールド座標 → 画面座標"""
@@ -139,7 +140,7 @@ class Board:
             pos[1]*self.SCALEY + self.SCREEN_HEIGHT//2
         )
 
-    def generate_resources_and_numbers(self):
+    def set_resources_and_numbers(self):
         """マスの資源と番号の配置を決める"""
         resources = (
             ["brick"]*3 + ["ore"]*3 +
@@ -155,7 +156,7 @@ class Board:
 
         return resources, numbers
     
-    def generate_vertex_and_edge_details(self, isSea: bool = False):
+    def get_board_details(self, isSea: bool = False):
         """頂点と辺の情報を取得する(どのマスに属しているかをインデックスを取得できるようにする)"""
         vertex_details: defaultdict[tuple[int,int], set[int]] = defaultdict(set)
         edge_details: defaultdict[tuple[tuple[int,int], tuple[int,int]], dict[str, bool]] = defaultdict(lambda: {"road": False, "ship": False})
@@ -194,17 +195,16 @@ class Board:
 
         # 現在の行動が最初の道配置であるならそれに対する表示を行う
         if self.crnt_action in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.SETROAD):
-            for edge in self.player_list[self.crnt_player_index].potential_road_pos:
-                self.draw_potential_road(edge)
-            for edge in self.player_list[self.crnt_player_index].potential_ship_pos:
-                self.draw_potential_road(edge)
+            for edge in self.player_list[self.crnt_player_index].possible_road_pos:
+                self.draw_possible_road(edge)
+            for edge in self.player_list[self.crnt_player_index].possible_ship_pos:
+                self.draw_possible_road(edge)
 
         # サイコロの描画
         if self.crnt_action == BoardState.ROLLDICE:
             # 7が出た場合
             if (dices_result := self.dices.draw(self.screen)) == 7:
-                
-                self.crnt_action = BoardState.THIEF
+                self.crnt_action = BoardState.DISCARD if any([hc.set_choosing_resouces_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
 
             elif dices_result:
                 hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
@@ -233,7 +233,6 @@ class Board:
                 self.crnt_action = BoardState.ACTION
                 self.hand_cards_by_player[self.crnt_player_index].set_possible_action()
 
-
         # 持ち札の描画
         for hand_cards in self.hand_cards_by_player:
             hand_cards.draw(self.screen)
@@ -246,7 +245,6 @@ class Board:
             self.to_screen((center[0]+dx, center[1]+dy))
             for dx,dy in self.VERTEX_DIR
         ]
-
         pygame.draw.polygon(
             self.screen,
             self.RESOURCE_COLORS[self.resources[index]],
@@ -263,6 +261,10 @@ class Board:
             )
             self.screen.blit(surf, surf.get_rect(center=self.to_screen(center)))
 
+        # 盗賊を動かす状態ならその場所の候補を描画する
+        if self.crnt_action == BoardState.THIEF and index != self.thief_pos_index:
+            pygame.draw.circle(self.screen, self.LINE_COLOR, self.to_screen(center), self.NUMBER_CHIP_RADIUS, self.LINE_WIDTH)
+
         for dx,dy in self.VERTEX_DIR:
             vertex: tuple[int,int] = (center[0]+dx, center[1]+dy)
             if (player_index := self.towns_already_set.get(vertex)) is not None:
@@ -270,7 +272,7 @@ class Board:
                 img = ImageManager.load(f"{self.CHARA_COLOR_NAME[player_index]}_town")
                 self.screen.blit(img, img.get_rect(center=self.to_screen(vertex)))
             # 開拓地を置く場所の候補
-            elif self.crnt_action in (BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN, BoardState.ACTION) and vertex in self.player_list[self.crnt_player_index].potential_town_pos:
+            elif self.crnt_action in (BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN, BoardState.SETTOWN) and vertex in self.player_list[self.crnt_player_index].possible_town_pos:
                 pygame.draw.circle(self.screen, self.CHARA_COLOR[self.crnt_player_index], self.to_screen(vertex), self.VERTEX_RADIUS)
 
     # 道を描画
@@ -285,7 +287,7 @@ class Board:
         )
 
     # 候補道を描画 (中は空白)
-    def draw_potential_road(self, edge: tuple[tuple[int,int], tuple[int, int]]):
+    def draw_possible_road(self, edge: tuple[tuple[int,int], tuple[int, int]]):
         start = self.to_screen(edge[0])
         end = self.to_screen(edge[1])
         if start[0] == end[0]:
@@ -341,24 +343,25 @@ class Board:
     def set_road(self, edge: tuple[tuple[int,int], tuple[int,int]], player_index: int):
         self.ways_already_set[edge] = player_index
         for player in self.player_list:
-            player.potential_road_pos.discard(edge)
+            player.possible_road_pos.discard(edge)
 
     # 開拓地を設置
-    def set_town(self, pos: tuple[int,int], player_index: int):
-        self.towns_already_set[pos] = player_index
+    def set_town(self, pos: tuple[int,int]):
+        self.towns_already_set[pos] = self.crnt_player_index
 
     # 都市を設置
     def set_city(self, pos: tuple[int,int]):
         pass
 
+    # 開拓地に関するマウスアクションを管理
     def pick_town_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action not in (BoardState.ACTION, BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN):
+        if self.crnt_action not in (BoardState.SETTOWN, BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN):
             return False
         
         mx, my = mouse_pos
         best_pos = None
         best_dist = None
-        for town_pos in self.player_list[self.crnt_player_index].potential_town_pos:
+        for town_pos in self.player_list[self.crnt_player_index].possible_town_pos:
             tx, ty = self.to_screen(town_pos)
             dist = math.hypot(mx - tx, my - ty)
             if dist <= self.VERTEX_RADIUS and (best_dist is None or dist < best_dist):
@@ -366,8 +369,10 @@ class Board:
                 best_pos = town_pos
 
         if best_pos is not None:
-            if self.crnt_action == BoardState.ACTION:
-                pass
+            if self.crnt_action == BoardState.SETTOWN:
+                self.set_town(best_pos)
+                self.delete_possible_town_pos(best_pos)
+                self.crnt_action = BoardState.ACTION
             elif self.crnt_action == BoardState.SETSECONDTOWN:
                 self.set_second_town(best_pos)
                 resources: list[int] = [0,0,0,0,0]
@@ -393,13 +398,14 @@ class Board:
         
         return False
     
+    # 道に関するマウスアクションを管理
     def pick_way_pos_from_mouse(self, mouse_pos: tuple[int,int]):
         if self.crnt_action not in (BoardState.SETROAD, BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD):
             return False
         
         best_edge = None
         best_dist = None
-        for road_edge in self.player_list[self.crnt_player_index].potential_road_pos:
+        for road_edge in self.player_list[self.crnt_player_index].possible_road_pos:
             from_vertex, to_vertex = road_edge
             fvertex = np.array(self.to_screen(from_vertex))
             tvertex = np.array(self.to_screen(to_vertex))
@@ -422,8 +428,8 @@ class Board:
         
         if best_edge is not None:
             self.set_road(best_edge, self.crnt_player_index)
-            self.update_potential_ways_from_vertex(best_edge[0], "road")
-            self.update_potential_ways_from_vertex(best_edge[1], "road")
+            self.update_possible_ways_from_vertex(best_edge[0], "road")
+            self.update_possible_ways_from_vertex(best_edge[1], "road")
             if self.crnt_action == BoardState.SETFIRSTROAD:
                 if self.crnt_player_index == 3:
                     self.crnt_action = BoardState.SETSECONDTOWN
@@ -431,40 +437,93 @@ class Board:
                     self.crnt_action = BoardState.SETFIRSTTOWN
                     self.crnt_player_index += 1 
             elif self.crnt_action == BoardState.SETSECONDROAD:
-                self.player_list[self.crnt_player_index].potential_town_pos = set()
-                self.update_potential_town_pos(best_edge[0])
-                self.update_potential_town_pos(best_edge[1])
+                self.player_list[self.crnt_player_index].possible_town_pos = set()
+                self.update_possible_town_pos(best_edge[0])
+                self.update_possible_town_pos(best_edge[1])
                 if self.crnt_player_index == 0:
                     self.crnt_action = BoardState.ROLLDICE
                 else:
                     self.crnt_action = BoardState.SETSECONDTOWN
                     self.crnt_player_index -= 1
             elif self.crnt_action == BoardState.SETROAD:
-                self.update_potential_town_pos(best_edge[0])
-                self.update_potential_town_pos(best_edge[1])
+                self.update_possible_town_pos(best_edge[0])
+                self.update_possible_town_pos(best_edge[1])
                 self.crnt_action = BoardState.ACTION
             return True
         
         return False
 
-    def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action != BoardState.ACTION:
-            return
+    # 盗賊の移動に関するマウスアクションを管理
+    def pick_thief_pos_from_mouse(self, mouse_pos: tuple[int,int]):
+        if self.crnt_action != BoardState.THIEF:
+            return False
         
-        if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
-            if action_type == ActionType.ROADBUILD:
-                self.crnt_action = BoardState.SETROAD
-            elif action_type == ActionType.QUIT:
-                self.crnt_player_index = (self.crnt_player_index + 1) % 4
-                self.crnt_action = BoardState.ROLLDICE
+        mx, my = mouse_pos
+        thief_pos_index = None
+        best_dist = None
 
+        for i, space_pos in enumerate(self.space_pos):
+            if i == self.thief_pos_index:
+                continue
+            tx, ty = self.to_screen(space_pos)
+            dist = math.hypot(mx - tx, my - ty)
+            if dist <= self.NUMBER_CHIP_RADIUS and (best_dist is None or dist < best_dist):
+                best_dist = dist
+                thief_pos_index = i
+
+        if thief_pos_index is not None:
+            if self.crnt_action == BoardState.THIEF:
+                self.thief_pos_index = thief_pos_index
+                
+                sx, sy = self.space_pos[thief_pos_index]
+                is_steal = False
+                for dx, dy in self.VERTEX_DIR:
+                    if (player_index := self.towns_already_set.get((sx+dx, sy+dy))) not in (None, self.crnt_player_index):
+                        self.hand_cards_by_player[player_index].crnt_action = "stolen"
+                        is_steal = True
+
+                self.crnt_action = BoardState.STEAL if is_steal else BoardState.ACTION
+                return True
+        
+        return False
+    
+    # サイコロ後の行動のマウスアクションを管理
+    def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
+        if self.crnt_action == BoardState.ACTION:
+            if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
+                if action_type == ActionType.ROADBUILD:
+                    self.crnt_action = BoardState.SETROAD
+                elif action_type == ActionType.TOWNBUILD:
+                    self.crnt_action = BoardState.SETTOWN
+                elif action_type == ActionType.QUIT:
+                    self.crnt_player_index = (self.crnt_player_index + 1) % 4
+                    self.crnt_action = BoardState.ROLLDICE
+        # elif self.crnt_action == BoardState.THIEF:
+
+        #     pass
+
+    # プレイヤーカードに対するマウスアクションを管理
+    def pick_action_in_card_from_mouse(self, mouse_pos: tuple[int,int]):
+        if self.crnt_action == BoardState.STEAL:
+            for i, hand_card in enumerate(self.hand_cards_by_player):
+                if i == self.crnt_player_index:
+                    continue
+                if (picked_resource := hand_card.pick_resource_to_steal_from_mouse(mouse_pos)) is None:
+                    continue
+                self.hand_cards_by_player[self.crnt_player_index].resources[picked_resource] += 1
+                self.crnt_action = BoardState.ACTION
+                for i, hand_card in enumerate(self.hand_cards_by_player):
+                    hand_card.crnt_action = "normal"
+                self.hand_cards_by_player[self.crnt_player_index].set_possible_action()
+                break
+            
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
         if self.crnt_action != BoardState.ROLLDICE:
             return
         
         self.dices.start_dice_rolling(mouse_pos)
 
-    def delete_potential_town_pos(self, vertex: tuple[int,int]):
+    def delete_possible_town_pos(self, vertex: tuple[int,int]):
         # この頂点からはY字状に辺が伸びている
         if vertex[1] % 3 == 2:
             town_pos_cannot_put: set[tuple[int,int]] = {vertex,(vertex[0]-2, vertex[1]-1),(vertex[0], vertex[1]+2),(vertex[0]+2, vertex[1]-1)}
@@ -480,27 +539,27 @@ class Board:
                 for vertex_adjacent in town_pos_cannot_put:
                     if (edge := tuple(sorted((vertex, vertex_adjacent), key=lambda x: x[1]))) in self.ways_already_set:
                         continue
-                    if edge in player.potential_road_pos:
+                    if edge in player.possible_road_pos:
                         if not any(vertex_adjacent == e[0] or vertex_adjacent == e[1] for e in self.ways_already_set.keys()):
-                            player.potential_road_pos.remove(edge)
+                            player.possible_road_pos.remove(edge)
                 
-            player.potential_town_pos.difference_update(town_pos_cannot_put)
+            player.possible_town_pos.difference_update(town_pos_cannot_put)
 
     def set_first_town(self, best_pos: tuple[int,int]):
-        self.set_town(best_pos, self.player_list[self.crnt_player_index].player_index)
+        self.set_town(best_pos)
         self.hand_cards_by_player[self.crnt_player_index].town_points += 1
-        self.delete_potential_town_pos(best_pos)
-        self.update_potential_ways_from_vertex(best_pos, "town")
+        self.delete_possible_town_pos(best_pos)
+        self.update_possible_ways_from_vertex(best_pos, "town")
         self.crnt_action = BoardState.SETFIRSTROAD
 
     def set_second_town(self, best_pos: tuple[int,int]):
-        self.set_town(best_pos, self.player_list[self.crnt_player_index].player_index)
+        self.set_town(best_pos)
         self.hand_cards_by_player[self.crnt_player_index].town_points += 1
-        self.delete_potential_town_pos(best_pos)
-        self.update_potential_ways_from_vertex(best_pos, "town")
+        self.delete_possible_town_pos(best_pos)
+        self.update_possible_ways_from_vertex(best_pos, "town")
         self.crnt_action = BoardState.SETSECONDROAD
 
-    def update_potential_town_pos(self, vertex: tuple[int,int]):
+    def update_possible_town_pos(self, vertex: tuple[int,int]):
         """現在設置した道に含まれる座標について、その座標と隣り合う座標全てで開拓地または都市がないなら、開拓地を置ける場所候補として登録する"""
         if vertex in self.towns_already_set:
             return
@@ -520,36 +579,36 @@ class Board:
         else:
             return
         
-        self.player_list[self.crnt_player_index].potential_town_pos.add(vertex)
+        self.player_list[self.crnt_player_index].possible_town_pos.add(vertex)
 
-    def update_potential_ways_from_vertex(self, vertex: tuple[int,int], object_type: str):
+    def update_possible_ways_from_vertex(self, vertex: tuple[int,int], object_type: str):
         """現在設置した道または開拓地から道を伸ばせる辺を新たに取得する"""
         # この頂点からはY字状に辺が伸びている
         if vertex[1] % 3 == 2:
             # まずは左上の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0]-2, vertex[1]-1), object_type)
+            self.update_possible_edge(vertex, (vertex[0]-2, vertex[1]-1), object_type)
             # 次は下の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0], vertex[1]+2), object_type)
+            self.update_possible_edge(vertex, (vertex[0], vertex[1]+2), object_type)
             # 最後は右上の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0]+2, vertex[1]-1), object_type)
+            self.update_possible_edge(vertex, (vertex[0]+2, vertex[1]-1), object_type)
 
         # この頂点からは上下逆さのY字状に辺が伸びている
         elif vertex[1] % 3 == 1:
             # まずは左下の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0]-2, vertex[1]+1), object_type)
+            self.update_possible_edge(vertex, (vertex[0]-2, vertex[1]+1), object_type)
             # 次は上の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0], vertex[1]-2), object_type)
+            self.update_possible_edge(vertex, (vertex[0], vertex[1]-2), object_type)
             # 最後は右下の頂点との辺を確認
-            self.update_potential_edge(vertex, (vertex[0]+2, vertex[1]+1), object_type)
+            self.update_possible_edge(vertex, (vertex[0]+2, vertex[1]+1), object_type)
 
-    def update_potential_edge(self, start_vertex: tuple[int,int], end_vertex: tuple[int,int], object_type: str):
+    def update_possible_edge(self, start_vertex: tuple[int,int], end_vertex: tuple[int,int], object_type: str):
         # この辺が存在しており、まだそこに道が置かれていないかを見る(後々、海賊で規制されていないかも確認できるようにする)
         edge = tuple(sorted((start_vertex, end_vertex), key=lambda x: x[1]))
         if edge in self.edge_details and edge not in self.ways_already_set:
             # 道が置ける辺であり、先端に自分以外の開拓地がない、前置いたのが船ではない場合は道を置ける
             if self.edge_details[edge]["road"] and self.towns_already_set.get(start_vertex) in (None, self.player_list[self.crnt_player_index].player_index) and object_type != "ship":
-                self.player_list[self.crnt_player_index].potential_road_pos.add(edge)
+                self.player_list[self.crnt_player_index].possible_road_pos.add(edge)
             
             # 船が置ける辺であり、先端に自分以外の開拓地がない、前置いたのが道ではない場合は船を置ける
             if self.edge_details[edge]["ship"] and self.towns_already_set.get(start_vertex) in (None, self.player_list[self.crnt_player_index].player_index) and object_type != "town":
-                self.player_list[self.crnt_player_index].potential_ship_pos.add(edge)
+                self.player_list[self.crnt_player_index].possible_ship_pos.add(edge)
