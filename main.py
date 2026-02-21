@@ -21,6 +21,8 @@ def main():
                     continue
                 if board.pick_town_pos_from_mouse(event.pos):
                     continue
+                if board.pick_city_pos_from_mouse(event.pos):
+                    continue
                 if board.pick_way_pos_from_mouse(event.pos):
                     continue
                 if board.pick_action_in_card_from_mouse(event.pos):
