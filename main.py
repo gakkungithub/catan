@@ -23,12 +23,9 @@ def main():
                     continue
                 if board.pick_way_pos_from_mouse(event.pos):
                     continue
-                if board.pick_action_from_mouse(event.pos):
+                if board.pick_action_in_card_from_mouse(event.pos):
                     continue
                 if board.pick_thief_pos_from_mouse(event.pos):
-                    continue
-                if board.pick_action_in_card_from_mouse(event.pos):
-                    print("here")
                     continue
                 board.start_dice_rolling(event.pos)
 

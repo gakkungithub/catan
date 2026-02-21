@@ -204,7 +204,7 @@ class Board:
         if self.crnt_action == BoardState.ROLLDICE:
             # 7が出た場合
             if (dices_result := self.dices.draw(self.screen)) == 7:
-                self.crnt_action = BoardState.DISCARD if any([hc.set_choosing_resouces_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
+                self.crnt_action = BoardState.DISCARD if any([hc.set_resource_num_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
 
             elif dices_result:
                 hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
@@ -474,7 +474,7 @@ class Board:
         if thief_pos_index is not None:
             if self.crnt_action == BoardState.THIEF:
                 self.thief_pos_index = thief_pos_index
-                
+
                 sx, sy = self.space_pos[thief_pos_index]
                 is_steal = False
                 for dx, dy in self.VERTEX_DIR:
@@ -486,25 +486,17 @@ class Board:
                 return True
         
         return False
-    
-    # サイコロ後の行動のマウスアクションを管理
-    def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action == BoardState.ACTION:
-            if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
-                if action_type == ActionType.ROADBUILD:
-                    self.crnt_action = BoardState.SETROAD
-                elif action_type == ActionType.TOWNBUILD:
-                    self.crnt_action = BoardState.SETTOWN
-                elif action_type == ActionType.QUIT:
-                    self.crnt_player_index = (self.crnt_player_index + 1) % 4
-                    self.crnt_action = BoardState.ROLLDICE
-        # elif self.crnt_action == BoardState.THIEF:
-
-        #     pass
 
     # プレイヤーカードに対するマウスアクションを管理
     def pick_action_in_card_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action == BoardState.STEAL:
+        if self.crnt_action == BoardState.DISCARD:
+            for i, hand_card in enumerate(self.hand_cards_by_player):
+                if hand_card.change_resource_num_to_be_discarded(mouse_pos):
+                    break
+            if all([hc.resource_num_to_be_discarded == 0 for hc in self.hand_cards_by_player]):
+                self.crnt_action = BoardState.THIEF
+                
+        elif self.crnt_action == BoardState.STEAL:
             for i, hand_card in enumerate(self.hand_cards_by_player):
                 if i == self.crnt_player_index:
                     continue
@@ -516,6 +508,15 @@ class Board:
                     hand_card.crnt_action = "normal"
                 self.hand_cards_by_player[self.crnt_player_index].set_possible_action()
                 break
+        elif self.crnt_action == BoardState.ACTION:
+            if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
+                if action_type == ActionType.ROADBUILD:
+                    self.crnt_action = BoardState.SETROAD
+                elif action_type == ActionType.TOWNBUILD:
+                    self.crnt_action = BoardState.SETTOWN
+                elif action_type == ActionType.QUIT:
+                    self.crnt_player_index = (self.crnt_player_index + 1) % 4
+                    self.crnt_action = BoardState.ROLLDICE
             
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
         if self.crnt_action != BoardState.ROLLDICE:

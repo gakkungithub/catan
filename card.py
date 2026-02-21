@@ -36,7 +36,8 @@ class HandCards:
         self.button_font = pygame.font.SysFont("Arial", self.BUTTON_FONT_SIZE)
 
         self.player_name = player_name
-        self.resources = [0] * 5
+        self.resources = [2] * 5
+        self.resources_to_be_discarded = [0] * 5
         self.developments = [0] * 5
 
         self.town_points = 0
@@ -62,8 +63,9 @@ class HandCards:
         self.arrow_down_image = pygame.transform.rotate(self.arrow_up_image, 180)
         self.discard_buttons: tuple[tuple[pygame.Rect, pygame.Rect]] = tuple([(self.arrow_up_image.get_rect(topright=(50*(i+1)-2, 85)), self.arrow_down_image.get_rect(topright=(50*(i+1)-2, 105))) for i in range(5)])
         self.possible_discard_buttons: list[tuple[int, tuple[pygame.Rect, pygame.Rect]]] = []
+        self.resource_card_in_out_rect = pygame.Rect(0, 45, self.card_width, 80)
 
-        self.choosing_resouces_to_be_discarded: bool = False
+        self.resource_num_to_be_discarded: int = 0
         self.resource_images = (
             ImageManager.load("tree"), ImageManager.load("brick"), ImageManager.load("sheep"), 
             ImageManager.load("wheat"), ImageManager.load("ore")
@@ -95,9 +97,12 @@ class HandCards:
         for i in range(5):
             img = self.resource_images[i]
             self.card_surface.blit(img, img.get_rect(topleft=(10+50*i, 50)))
-            surf = self.font.render(str(self.resources[i]), True, self.color)
+            if self.resource_num_to_be_discarded:
+                surf = self.font.render(str(self.resources[i] - self.resources_to_be_discarded[i]), True, self.color)
+            else:
+                surf = self.font.render(str(self.resources[i]), True, self.color)
             self.card_surface.blit(surf, surf.get_rect(topright=(28+50*i, 90)))
-            if self.choosing_resouces_to_be_discarded:
+            if self.resource_num_to_be_discarded:
                 self.card_surface.blit(self.arrow_up_image, self.arrow_up_image.get_rect(topright=(50*(i+1)-2, 85)))
                 self.card_surface.blit(self.arrow_down_image, self.arrow_down_image.get_rect(topright=(50*(i+1)-2, 105)))
 
@@ -114,10 +119,22 @@ class HandCards:
                 pygame.draw.rect(self.action_surface, self.BUTTON_BG_COLOR, button_rect, border_radius=self.BUTTON_RADIUS)
                 self.action_surface.blit(button_surf, button_label)
             screen.blit(self.action_surface, (self.x+self.card_width+10, self.y))
-        elif self.crnt_action == "stolen":
-            pygame.draw.rect(self.card_surface, self.color, pygame.Rect(0, 50, self.card_width, 65), 2)
+        elif self.crnt_action in "stolen":
+            pygame.draw.rect(self.card_surface, self.color, self.resource_card_in_out_rect, 2)
             surf = self.font.render("steal ?", True, self.color)
-            self.card_surface.blit(surf, surf.get_rect(center=(self.card_width // 2, 40)))
+            rect = surf.get_rect(center=(self.card_width // 2, 35))
+            pygame.draw.rect(self.card_surface, self.BUTTON_BG_COLOR, rect, border_radius=self.BUTTON_RADIUS)
+            self.card_surface.blit(surf, rect)
+        elif self.resource_num_to_be_discarded:
+            pygame.draw.rect(self.card_surface, self.color, self.resource_card_in_out_rect, 2)
+            # 現在選んだ資源カードの枚数が捨てる枚数と一致していないなら確定ボタンの色を薄くする
+            if sum(self.resources_to_be_discarded) == self.resource_num_to_be_discarded:
+                surf = self.font.render(f"Finish", True, self.color)
+            else:
+                surf = self.font.render(f"{sum(self.resources_to_be_discarded)} / {self.resource_num_to_be_discarded}", True, (*self.color, 80))
+            rect = surf.get_rect(center=(self.card_width // 2, 35))
+            pygame.draw.rect(self.card_surface, self.BUTTON_BG_COLOR, rect, border_radius=self.BUTTON_RADIUS)
+            self.card_surface.blit(surf, rect)
 
         screen.blit(self.card_surface, (self.x, self.y))
 
@@ -152,8 +169,34 @@ class HandCards:
         
         return None
     
+    def change_resource_num_to_be_discarded(self, mouse_pos: tuple[int,int]):
+        if self.resource_num_to_be_discarded == 0:
+            return False
+        
+        local_pos = (mouse_pos[0]-self.x, mouse_pos[1]-self.y)
+
+        if (self.card_width //2 - self.FONT_SIZE * 4.5 <= local_pos[0] <= self.card_width // 2 + self.FONT_SIZE * 4.5 
+            and 35 - self.FONT_SIZE // 2 <= local_pos[1] <= 35 + self.FONT_SIZE // 2
+            and sum(self.resources_to_be_discarded) == self.resource_num_to_be_discarded):
+            self.resources = [self.resources[i] - self.resources_to_be_discarded[i] for i in range(5)]
+            self.resources_to_be_discarded = [0] * 5
+            self.resource_num_to_be_discarded = 0
+            return True
+        
+        for i, (arrow_up_button, arrow_down_button) in self.possible_discard_buttons:
+            if arrow_up_button.collidepoint(local_pos) and self.resources_to_be_discarded[i] > 0:
+                self.resources_to_be_discarded[i] -= 1
+                return True
+            elif arrow_down_button.collidepoint(local_pos) and sum(self.resources_to_be_discarded) < self.resource_num_to_be_discarded and self.resources_to_be_discarded[i] < self.resources[i]:
+                self.resources_to_be_discarded[i] += 1
+                return True
+        
+        return False
+    
     def pick_resource_to_steal_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action == "stolen" and self.x <= mouse_pos[0] <= self.x + self.card_width and self.y <= mouse_pos[1] <= self.y + self.height:
+        local_pos = (mouse_pos[0]-self.x, mouse_pos[1]-self.y)
+
+        if self.crnt_action == "stolen" and self.card_width // 2 - self.FONT_SIZE * 3.5 <= local_pos[0] <= self.card_width // 2 + self.FONT_SIZE * 3.5 and 35 - self.FONT_SIZE // 2 <= local_pos[1] <= 35 + self.FONT_SIZE // 2:
             resources_not_zero = [i for i, num in enumerate(self.resources) if num != 0]
             if len(resources_not_zero) == 0:
                 return None
@@ -186,8 +229,8 @@ class HandCards:
     def add_resources(self, resources_to_add: list[int]):
         self.resources = [i+j for i, j in zip(self.resources, resources_to_add)]
 
-    def set_choosing_resouces_to_be_discarded(self):
-        self.choosing_resouces_to_be_discarded = sum(self.resources) >= 8
-        if self.choosing_resouces_to_be_discarded:
+    def set_resource_num_to_be_discarded(self):
+        self.resource_num_to_be_discarded = sum(self.resources) // 2 if sum(self.resources) >= 8 else 0
+        if self.resource_num_to_be_discarded:
             self.possible_discard_buttons = [(i, buttons) for i, buttons in enumerate(self.discard_buttons)]
-        return self.choosing_resouces_to_be_discarded
+        return self.resource_num_to_be_discarded
