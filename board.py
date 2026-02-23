@@ -20,12 +20,14 @@ class BoardState(Enum):
     SETROAD = 5
     DEVELOPROAD = 6
     SETCITY = 7
-    ROLLDICE = 8
-    DISCARD = 9
-    THIEF = 10
-    STEAL = 11
-    PLENTY = 12
-    ACTION = 13
+    TRADE = 8
+    ROLLDICE = 9
+    DISCARD = 10
+    THIEF = 11
+    STEAL = 12
+    PLENTY = 13
+    MONOPOLY = 14
+    ACTION = 15
 
 class Board:
     VERTEX_DIR = ((0,-2),(2,-1),(2,1),(0,2),(-2,1),(-2,-1))
@@ -116,7 +118,7 @@ class Board:
 
         self.resources_to_get: list[int] = []
 
-        self.crnt_action = BoardState.SETFIRSTTOWN
+        self.crnt_state = BoardState.SETFIRSTTOWN
 
         self.crnt_player_index = 0
         self.player_list: list[HumanPlayer] = [HumanPlayer(i, self.get_first_possible_town_pos()) for i in range(4)]
@@ -127,7 +129,9 @@ class Board:
                                                       HandCards(pygame.Rect(10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[2], "Player 3"),
                                                       HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[3], "Player 4"))
 
-        # 発展カードを使った時に、2枚目の発展カードを使えないようにこの変数をTrueにする
+        # 交渉を2度行えないように、交渉が成立した時にこの変数をFalseにする
+        self.is_trade_not_done: bool = True
+        # 2枚目の発展カードを使えないように、発展カードを使った時にこの変数をTrueにする
         self.development_used: bool = False
         # 最大騎士力を持っているプレイヤーと、その騎士カードの枚数
         self.max_kinght_power_player: tuple[int, int] | None = None
@@ -216,17 +220,17 @@ class Board:
         self.draw_towns_and_cities()
 
         # 現在の行動が最初の道配置であるならそれに対する表示を行う
-        if self.crnt_action in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.SETROAD, BoardState.DEVELOPROAD):
+        if self.crnt_state in (BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.SETROAD, BoardState.DEVELOPROAD):
             for edge in self.player_list[self.crnt_player_index].possible_road_pos:
                 self.draw_possible_road(edge)
             for edge in self.player_list[self.crnt_player_index].possible_ship_pos:
                 self.draw_possible_road(edge)
 
         # サイコロの描画
-        if self.crnt_action == BoardState.ROLLDICE:
+        if self.crnt_state == BoardState.ROLLDICE:
             # 7が出た場合
             if (dices_result := self.dices.draw(self.screen)) == 7:
-                self.crnt_action = BoardState.DISCARD if any([hc.set_resource_num_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
+                self.crnt_state = BoardState.DISCARD if any([hc.set_resource_num_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
 
             elif dices_result:
                 hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
@@ -298,13 +302,13 @@ class Board:
             self.screen.blit(surf, surf.get_rect(center=self.to_screen(center)))
 
         # 盗賊を動かす状態ならその場所の候補を描画する
-        if self.crnt_action == BoardState.THIEF and index != self.thief_pos_index:
+        if self.crnt_state == BoardState.THIEF and index != self.thief_pos_index:
             pygame.draw.circle(self.screen, self.LINE_COLOR, self.to_screen(center), self.NUMBER_CHIP_RADIUS, self.LINE_WIDTH)
 
     # 開拓地と都市の描画
     def draw_towns_and_cities(self):
         for vertex, player_index in self.towns_already_set.items():
-            if player_index == self.crnt_player_index and self.crnt_action == BoardState.SETCITY:
+            if player_index == self.crnt_player_index and self.crnt_state == BoardState.SETCITY:
                 pygame.draw.circle(self.screen, self.CHARA_COLOR[self.crnt_player_index], self.to_screen(vertex), self.VERTEX_RADIUS)
             else:
                 img = ImageManager.load(f"{self.CHARA_COLOR_NAME[player_index]}_town")
@@ -314,7 +318,7 @@ class Board:
             img = ImageManager.load(f"{self.CHARA_COLOR_NAME[player_index]}_city")
             self.screen.blit(img, img.get_rect(center=self.to_screen(vertex)))
 
-        if self.crnt_action in (BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN, BoardState.SETTOWN):
+        if self.crnt_state in (BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN, BoardState.SETTOWN):
             for vertex in self.player_list[self.crnt_player_index].possible_town_pos:
                 pygame.draw.circle(self.screen, self.CHARA_COLOR[self.crnt_player_index], self.to_screen(vertex), self.VERTEX_RADIUS)
 
@@ -403,7 +407,7 @@ class Board:
 
     # 開拓地に関するマウスアクションを管理
     def pick_town_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action not in (BoardState.SETTOWN, BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN):
+        if self.crnt_state not in (BoardState.SETTOWN, BoardState.SETFIRSTTOWN, BoardState.SETSECONDTOWN):
             return False
         
         mx, my = mouse_pos
@@ -417,10 +421,10 @@ class Board:
                 best_pos = town_pos
 
         if best_pos is not None:
-            if self.crnt_action == BoardState.SETTOWN:
+            if self.crnt_state == BoardState.SETTOWN:
                 self.set_town(best_pos)
                 self.set_board_state_to_action()
-            elif self.crnt_action == BoardState.SETSECONDTOWN:
+            elif self.crnt_state == BoardState.SETSECONDTOWN:
                 self.set_second_town(best_pos)
                 resources: list[int] = [0,0,0,0,0]
                 for space_index in self.vertex_details[best_pos]:
@@ -447,7 +451,7 @@ class Board:
 
     # 都市に関するマウスアクションを管理
     def pick_city_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action != BoardState.SETCITY:
+        if self.crnt_state != BoardState.SETCITY:
             return False
         
         mx, my = mouse_pos
@@ -472,7 +476,7 @@ class Board:
     
     # 道に関するマウスアクションを管理
     def pick_way_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action not in (BoardState.SETROAD, BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.DEVELOPROAD):
+        if self.crnt_state not in (BoardState.SETROAD, BoardState.SETFIRSTROAD, BoardState.SETSECONDROAD, BoardState.DEVELOPROAD):
             return False
         
         best_edge = None
@@ -502,39 +506,39 @@ class Board:
             self.set_road(best_edge, self.crnt_player_index)
             self.update_possible_ways_from_vertex(best_edge[0], "road")
             self.update_possible_ways_from_vertex(best_edge[1], "road")
-            if self.crnt_action == BoardState.SETFIRSTROAD:
+            if self.crnt_state == BoardState.SETFIRSTROAD:
                 if self.crnt_player_index == 3:
-                    self.crnt_action = BoardState.SETSECONDTOWN
+                    self.crnt_state = BoardState.SETSECONDTOWN
                 else:
-                    self.crnt_action = BoardState.SETFIRSTTOWN
+                    self.crnt_state = BoardState.SETFIRSTTOWN
                     self.crnt_player_index += 1 
-            elif self.crnt_action == BoardState.SETSECONDROAD:
+            elif self.crnt_state == BoardState.SETSECONDROAD:
                 self.player_list[self.crnt_player_index].possible_town_pos = set()
                 self.update_possible_town_pos(best_edge[0])
                 self.update_possible_town_pos(best_edge[1])
                 if self.crnt_player_index == 0:
-                    self.crnt_action = BoardState.ROLLDICE
+                    self.crnt_state = BoardState.ROLLDICE
                 else:
-                    self.crnt_action = BoardState.SETSECONDTOWN
+                    self.crnt_state = BoardState.SETSECONDTOWN
                     self.crnt_player_index -= 1
-            elif self.crnt_action == BoardState.SETROAD:
+            elif self.crnt_state == BoardState.SETROAD:
                 self.update_possible_town_pos(best_edge[0])
                 self.update_possible_town_pos(best_edge[1])
                 self.set_board_state_to_action()
-            elif self.crnt_action == BoardState.DEVELOPROAD:
+            elif self.crnt_state == BoardState.DEVELOPROAD:
                 self.update_possible_town_pos(best_edge[0])
                 self.update_possible_town_pos(best_edge[1])
                 # 2つ目の道を作れない場合はそこで街道建設を終了する
                 if len(self.player_list[self.crnt_player_index].possible_road_pos) + len(self.player_list[self.crnt_player_index].possible_ship_pos) == 0:
                     self.set_board_state_to_action()
-                self.crnt_action = BoardState.SETROAD
+                self.crnt_state = BoardState.SETROAD
             return True
         
         return False
 
     # 盗賊の移動に関するマウスアクションを管理
     def pick_thief_pos_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action != BoardState.THIEF:
+        if self.crnt_state != BoardState.THIEF:
             return False
         
         mx, my = mouse_pos
@@ -551,7 +555,7 @@ class Board:
                 thief_pos_index = i
 
         if thief_pos_index is not None:
-            if self.crnt_action == BoardState.THIEF:
+            if self.crnt_state == BoardState.THIEF:
                 self.thief_pos_index = thief_pos_index
 
                 sx, sy = self.space_pos[thief_pos_index]
@@ -562,7 +566,7 @@ class Board:
                         is_steal = True
 
                 if is_steal:
-                    self.crnt_action = BoardState.STEAL
+                    self.crnt_state = BoardState.STEAL
                 else:
                     self.set_board_state_to_action()
                 return True
@@ -571,13 +575,13 @@ class Board:
 
     # プレイヤーカード(アクションと発展カード)に対するマウスアクションを管理
     def pick_action_in_card_from_mouse(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action == BoardState.DISCARD:
+        if self.crnt_state == BoardState.DISCARD:
             for i, hand_card in enumerate(self.hand_cards_by_player):
                 if hand_card.change_resource_num_to_be_discarded(mouse_pos):
                     break
             if all([hc.resource_num_to_be_discarded == 0 for hc in self.hand_cards_by_player]):
-                self.crnt_action = BoardState.THIEF
-        elif self.crnt_action == BoardState.STEAL:
+                self.crnt_state = BoardState.THIEF
+        elif self.crnt_state == BoardState.STEAL:
             for i, hand_card in enumerate(self.hand_cards_by_player):
                 if i == self.crnt_player_index:
                     continue
@@ -588,7 +592,7 @@ class Board:
                     hand_card.crnt_action = "normal"
                 self.set_board_state_to_action()
                 break
-        elif self.crnt_action == BoardState.PLENTY:
+        elif self.crnt_state == BoardState.PLENTY:
             if (resource_to_get := self.hand_cards_by_player[self.crnt_player_index].pick_resource_to_get_from_mouse(mouse_pos)) is None:
                 return
             self.resources_to_get.append(resource_to_get)
@@ -597,21 +601,53 @@ class Board:
                     self.hand_cards_by_player[self.crnt_player_index].resources[resource_to_get] += 1
                 self.resources_to_get = []
                 self.set_board_state_to_action()
-        elif self.crnt_action == BoardState.ACTION:
+        elif self.crnt_state == BoardState.MONOPOLY:
+            if (resource_to_get := self.hand_cards_by_player[self.crnt_player_index].pick_resource_to_get_from_mouse(mouse_pos)) is None:
+                return
+            resource_count = 0
+            for i, hand_card in enumerate(self.hand_cards_by_player):
+                if i == self.crnt_player_index:
+                    continue
+                resource_count += hand_card.resources[resource_to_get]
+                hand_card.resources[resource_to_get] = 0
+            self.hand_cards_by_player[self.crnt_player_index].resources[resource_to_get] += resource_count
+            self.set_board_state_to_action()
+        elif self.crnt_state == BoardState.TRADE:
+            crnt_hand_card = self.hand_cards_by_player[self.crnt_player_index]
+            crnt_hand_card.change_resource_num_for_trade(mouse_pos)
+            if crnt_hand_card.crnt_action == "normal":
+                # 交渉相手は今のところランダムなプレイヤーから選ぶようにしている
+                player_index_who_can_agree_with_the_trade: list[int] = []
+                for i, hand_card in enumerate(self.hand_cards_by_player):
+                    if i == self.crnt_player_index:
+                        continue
+                    if all([hand_card.resources[i] >= crnt_hand_card.resources_to_be_taken[i] for i in range(5)]):
+                        player_index_who_can_agree_with_the_trade.append(i)
+                if len(player_index_who_can_agree_with_the_trade):
+                    player_agreed_with_trade = random.choice(player_index_who_can_agree_with_the_trade)
+                    hand_card.resources = [hand_card.resources[i] + hand_card.resources_to_be_taken[i] - hand_card.resources_to_be_discarded[i] for i in range(5)]
+                    self.hand_cards_by_player[player_agreed_with_trade].resources = [self.hand_cards_by_player[player_agreed_with_trade].resources[i] - hand_card.resources_to_be_taken[i] for i in range(5)]
+                    self.is_trade_not_done = False
+                hand_card.resources_to_be_discarded = [0] * 5
+                hand_card.resources_to_be_taken = [0] * 5
+                self.set_board_state_to_action()
+        elif self.crnt_state == BoardState.ACTION:
             if (action_type := self.hand_cards_by_player[self.crnt_player_index].pick_action_from_mouse(mouse_pos)) is not None:
                 if action_type == ActionType.SETROAD:
-                    self.crnt_action = BoardState.SETROAD
+                    self.crnt_state = BoardState.SETROAD
                 elif action_type == ActionType.SETTOWN:
-                    self.crnt_action = BoardState.SETTOWN
+                    self.crnt_state = BoardState.SETTOWN
                 elif action_type == ActionType.SETCITY:
-                    self.crnt_action = BoardState.SETCITY
+                    self.crnt_state = BoardState.SETCITY
                 elif action_type == ActionType.DEVELOPMENT:
                     new_development = self.developments.pop(0)
                     self.hand_cards_by_player[self.crnt_player_index].developments_got_now[new_development] += 1
                     self.set_board_state_to_action()
+                elif action_type == ActionType.TRADE:
+                    self.crnt_state = BoardState.TRADE
                 elif action_type == ActionType.QUIT:
                     self.crnt_player_index = (self.crnt_player_index + 1) % 4
-                    self.crnt_action = BoardState.ROLLDICE
+                    self.crnt_state = BoardState.ROLLDICE
 
             if action_type is not None or self.development_used:
                 return
@@ -627,22 +663,23 @@ class Board:
                     elif crnt_kinght_power == 3:
                         self.hand_cards_by_player[self.crnt_player_index].is_max_kinght_power = True
                         self.max_kinght_power_player = (self.crnt_player_index, crnt_kinght_power)
-                    self.crnt_action = BoardState.THIEF
+                    self.crnt_state = BoardState.THIEF
                 elif development_type == DevelopmentCardType.ROAD:
                     # 使っても道を配置できない状況なら無効となる
                     if len(self.player_list[self.crnt_player_index].possible_road_pos) + len(self.player_list[self.crnt_player_index].possible_ship_pos):
-                        self.crnt_action = BoardState.DEVELOPROAD
+                        self.crnt_state = BoardState.DEVELOPROAD
                     else:
                         self.set_board_state_to_action()
                 elif development_type == DevelopmentCardType.PLENTY:
-                    self.crnt_action = BoardState.PLENTY
+                    self.crnt_state = BoardState.PLENTY
                 # development_type == DevelopmentCardType.MONOPOLY
                 else:
-                    pass
+                    self.crnt_state = BoardState.MONOPOLY
+
                 self.development_used = True
             
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
-        if self.crnt_action != BoardState.ROLLDICE:
+        if self.crnt_state != BoardState.ROLLDICE:
             return
         
         self.dices.start_dice_rolling(mouse_pos)
@@ -672,12 +709,12 @@ class Board:
     def set_first_town(self, best_pos: tuple[int,int]):
         self.set_town(best_pos)
         self.update_possible_ways_from_vertex(best_pos, "town")
-        self.crnt_action = BoardState.SETFIRSTROAD
+        self.crnt_state = BoardState.SETFIRSTROAD
 
     def set_second_town(self, best_pos: tuple[int,int]):
         self.set_town(best_pos)
         self.update_possible_ways_from_vertex(best_pos, "town")
-        self.crnt_action = BoardState.SETSECONDROAD
+        self.crnt_state = BoardState.SETSECONDROAD
 
     def update_possible_town_pos(self, vertex: tuple[int,int]):
         """現在設置した道に含まれる座標について、その座標と隣り合う座標全てで開拓地または都市がないなら、開拓地を置ける場所候補として登録する"""
@@ -734,10 +771,11 @@ class Board:
                 self.player_list[self.crnt_player_index].possible_ship_pos.add(edge)
 
     def set_board_state_to_action(self):
-        self.crnt_action = BoardState.ACTION
+        self.crnt_state = BoardState.ACTION
         self.hand_cards_by_player[self.crnt_player_index].set_possible_action(
             len(self.player_list[self.crnt_player_index].possible_road_pos) != 0, 
             len(self.player_list[self.crnt_player_index].possible_ship_pos) != 0,
             len(self.player_list[self.crnt_player_index].possible_town_pos) != 0, 
-            len(self.developments) != 0
+            len(self.developments) != 0,
+            self.is_trade_not_done
             )
