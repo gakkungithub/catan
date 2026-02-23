@@ -38,7 +38,11 @@ class HandCards:
         self.player_name = player_name
         self.resources = [0] * 5
         self.resources_to_be_discarded = [0] * 5
-        self.developments = [0] * 5
+        self.developments = [1] * 5
+        self.developments_got_now = [0] * 5
+        self.developments_used = [0] * 5
+
+        self.is_max_kinght_power = False
 
         self.town_count = 0
         self.city_count = 0
@@ -67,14 +71,10 @@ class HandCards:
         self.resource_card_in_out_rect = pygame.Rect(0, 45, self.card_width, 80)
 
         self.resource_num_to_be_discarded: int = 0
-        self.resource_images = (
-            ImageManager.load("tree"), ImageManager.load("brick"), ImageManager.load("sheep"), 
-            ImageManager.load("wheat"), ImageManager.load("ore")
-            )
-        self.development_images = (
-            ImageManager.load("knight"), ImageManager.load("road"), ImageManager.load("plenty"), 
-            ImageManager.load("monopoly"), ImageManager.load("point")
-            )
+        
+        self.resource_images = tuple([self.get_image_rect(name, (10+50*i, 50)) for i, name in enumerate(("tree", "brick", "sheep", "wheat", "ore"))])
+        
+        self.development_images = tuple([self.get_image_rect(name, (10+50*i, 130)) for i, name in enumerate(("knight", "road", "plenty", "monopoly", "point"))])
 
         self.crnt_action = "normal"
 
@@ -86,18 +86,25 @@ class HandCards:
         rect.center = button_rect.center
         return surf, rect, button_rect
 
+    def get_image_rect(self, name: str, pos: tuple[int,int]):
+        img = ImageManager.load(name)
+        rect = img.get_rect(topleft=pos)
+        return img, rect
+
     def draw(self, screen: pygame.Surface):
         self.card_surface.fill((150,150,150))
         
         surf = self.font.render(self.player_name, True, self.color)
         self.card_surface.blit(surf, surf.get_rect(topleft=(10, 10)))
-        surf = self.font.render(f"{self.town_count + self.city_count * 2 + self.developments[4]} / 10", True, self.color)
+
+        # 現在の得点の表示
+        surf = self.font.render(f"{self.town_count + self.city_count * 2 + self.developments[4] + self.is_max_kinght_power * 2} / 10", True, self.color)
         self.card_surface.blit(surf, surf.get_rect(topright=(self.card_width-10, 10)))
 
         # 資源カードの表示
         for i in range(5):
-            img = self.resource_images[i]
-            self.card_surface.blit(img, img.get_rect(topleft=(10+50*i, 50)))
+            img, rect = self.resource_images[i]
+            self.card_surface.blit(img, rect)
             if self.resource_num_to_be_discarded:
                 surf = self.font.render(str(self.resources[i] - self.resources_to_be_discarded[i]), True, self.color)
             else:
@@ -109,10 +116,18 @@ class HandCards:
 
         # 発展カードの表示
         for i in range(5):
-            img = self.development_images[i]
-            self.card_surface.blit(img, img.get_rect(topleft=(10+50*i, 130)))
+            img, rect = self.development_images[i]
+            self.card_surface.blit(img, rect)
             surf = self.font.render(str(self.developments[i]), True, self.color)
             self.card_surface.blit(surf, surf.get_rect(topright=(28+50*i, 170)))
+            if self.developments_got_now[i]:
+                surf = self.button_font.render(f"+{self.developments_got_now[i]}", True, self.color)
+                self.card_surface.blit(surf, surf.get_rect(center=(40+50*i, 170)))
+            if self.developments_used[i]:
+                surf = self.button_font.render(str(self.developments_used[i]), True, self.color)
+                self.card_surface.blit(surf, surf.get_rect(center=(40+50*i, 190)))
+                if i == DevelopmentCardType.KNIGHT and self.is_max_kinght_power:
+                    pygame.draw.circle(self.card_surface, self.color, (40+50*i, 190), 8, 2)
 
         if self.crnt_action == "action":
             self.action_surface.fill((255,255,255))
@@ -139,7 +154,7 @@ class HandCards:
 
         screen.blit(self.card_surface, (self.x, self.y))
 
-    def pick_action_from_mouse(self, mouse_pos: tuple[int,int], is_able_to_set_town: bool):
+    def pick_action_from_mouse(self, mouse_pos: tuple[int,int]):
         local_pos = (mouse_pos[0]-self.x-self.card_width, mouse_pos[1]-self.y)
 
         for i, (_, _, button_rect) in self.possible_actions:
@@ -152,6 +167,7 @@ class HandCards:
                     self.resources[ResourceCardType.BRICK] -= 1
                     self.resources[ResourceCardType.SHEEP] -= 1
                     self.resources[ResourceCardType.WHEAT] -= 1
+                    number_town_possible_to_set -= 1
                 elif i == ActionType.SETCITY:
                     self.resources[ResourceCardType.WHEAT] -= 2
                     self.resources[ResourceCardType.ORE] -= 3
@@ -163,13 +179,29 @@ class HandCards:
                     print("trade")
                 else:
                     print("quit")
-                    self.crnt_action = "normal"
-                    return i
-                self.set_possible_action(is_able_to_set_town)
+                    # このターンで発展カードを取得した場合、手札に加える
+                    if sum(self.developments_got_now):
+                        self.developments = [self.developments[i] + self.developments_got_now[i] for i in range(5)]
+                        self.developments_got_now = [0] * 5
+                self.crnt_action = "normal"
                 return i
         
         return None
-    
+
+    def pick_development_from_mouse(self, mouse_pos: tuple[int,int]):
+        local_pos = (mouse_pos[0]-self.x, mouse_pos[1]-self.y)
+
+        for i, (_, rect) in enumerate(self.development_images):
+            if i == 4 or self.developments[i] == 0:
+                continue
+            if rect.collidepoint(local_pos):
+                self.developments[i] -= 1
+                self.developments_used[i] += 1
+                self.crnt_action = "normal"
+                return i
+        
+        return None
+
     def change_resource_num_to_be_discarded(self, mouse_pos: tuple[int,int]):
         if self.resource_num_to_be_discarded == 0:
             return False
@@ -207,10 +239,20 @@ class HandCards:
         
         return None
 
-    def set_possible_action(self, is_able_to_set_town: bool):
+    def pick_resource_to_get_from_mouse(self, mouse_pos: tuple[int,int]):
+        local_pos = (mouse_pos[0]-self.x, mouse_pos[1]-self.y)
+
+        for i, (_, rect) in enumerate(self.resource_images):
+            if rect.collidepoint(local_pos):
+                return i
+        
+        return None
+
+    # 今のところは船建設は考えない
+    def set_possible_action(self, is_able_to_set_road: bool, is_able_to_set_ship: bool, is_able_to_set_town: bool, is_able_to_pick_development: bool):
         self.possible_actions = []
         # 街道建設
-        if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1:
+        if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1 and is_able_to_set_road:
             self.possible_actions.append((ActionType.SETROAD, self.actions[ActionType.SETROAD]))
         # 開拓地建設
         if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1 and self.resources[ResourceCardType.SHEEP] >= 1 and self.resources[ResourceCardType.WHEAT] >= 1 and self.town_count != 5 and is_able_to_set_town:
@@ -219,7 +261,7 @@ class HandCards:
         if self.resources[ResourceCardType.WHEAT] >= 2 and self.resources[ResourceCardType.ORE] >= 3 and self.town_count >= 1 and self.city_count < 5:
             self.possible_actions.append((ActionType.SETCITY, self.actions[ActionType.SETCITY]))
         # 発展
-        if self.resources[ResourceCardType.SHEEP] >= 1 and self.resources[ResourceCardType.WHEAT] >= 1 and self.resources[ResourceCardType.ORE] >= 1:
+        if self.resources[ResourceCardType.SHEEP] >= 1 and self.resources[ResourceCardType.WHEAT] >= 1 and self.resources[ResourceCardType.ORE] >= 1 and is_able_to_pick_development:
             self.possible_actions.append((ActionType.DEVELOPMENT, self.actions[ActionType.DEVELOPMENT]))
         # 交渉
         if sum(self.resources):
