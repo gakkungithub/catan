@@ -31,12 +31,13 @@ class HandCards:
     BUTTON_BG_COLOR = (100,100,100)
     BUTTON_RADIUS = 5
 
-    def __init__(self, rect: pygame.Rect, color: tuple[int,int,int], player_name: str):
+    def __init__(self, rect: pygame.Rect, color: tuple[int,int,int], player_name: str, resources_already_get: list[int]):
         self.font = pygame.font.SysFont("Arial", self.FONT_SIZE)
         self.button_font = pygame.font.SysFont("Arial", self.BUTTON_FONT_SIZE)
 
         self.player_name = player_name
         self.resources = [0] * 5
+        self.resources_already_get = resources_already_get
         self.resources_to_be_discarded = [0] * 5
         self.resources_to_be_taken = [0] * 5
         self.developments = [0] * 5
@@ -46,6 +47,8 @@ class HandCards:
         self.is_max_knight_power = False
         self.is_max_length = False
 
+        self.road_count = 0
+        self.ship_count = 0
         self.town_count = 0
         self.city_count = 0
         
@@ -191,27 +194,19 @@ class HandCards:
         for i, (_, _, button_rect) in self.possible_actions:
             if button_rect.collidepoint(local_pos):
                 if i == ActionType.SETROAD:
-                    self.resources[ResourceCardType.TREE] -= 1
-                    self.resources[ResourceCardType.BRICK] -= 1
+                    self.discard_resources([1,1,0,0,0])
                 elif i == ActionType.SETTOWN:
-                    self.resources[ResourceCardType.TREE] -= 1
-                    self.resources[ResourceCardType.BRICK] -= 1
-                    self.resources[ResourceCardType.SHEEP] -= 1
-                    self.resources[ResourceCardType.WHEAT] -= 1
+                    self.discard_resources([1,1,1,1,0])
                     number_town_possible_to_set -= 1
                 elif i == ActionType.SETCITY:
-                    self.resources[ResourceCardType.WHEAT] -= 2
-                    self.resources[ResourceCardType.ORE] -= 3
+                    self.discard_resources([0,0,0,2,3])
                 elif i == ActionType.DEVELOPMENT:
-                    self.resources[ResourceCardType.SHEEP] -= 1
-                    self.resources[ResourceCardType.WHEAT] -= 1
-                    self.resources[ResourceCardType.ORE] -= 1
+                    self.discard_resources([0,0,1,1,1])
                 elif i == ActionType.TRADE:
                     self.crnt_action = "give"
                     self.get_arrow_buttons()
                     return i
                 else:
-                    print("quit")
                     # このターンで発展カードを取得した場合、手札に加える
                     if sum(self.developments_got_now):
                         self.developments = [self.developments[i] + self.developments_got_now[i] for i in range(5)]
@@ -244,7 +239,7 @@ class HandCards:
         if (self.card_width //2 - self.FONT_SIZE * 4.5 <= local_pos[0] <= self.card_width // 2 + self.FONT_SIZE * 4.5 
             and 25 - self.FONT_SIZE // 2 <= local_pos[1] <= 25 + self.FONT_SIZE // 2
             and sum(self.resources_to_be_discarded) == self.resource_num_to_be_discarded):
-            self.resources = [self.resources[i] - self.resources_to_be_discarded[i] for i in range(5)]
+            self.discard_resources(self.resources_to_be_discarded)
             self.resources_to_be_discarded = [0] * 5
             self.resource_num_to_be_discarded = 0
             return True
@@ -324,7 +319,7 @@ class HandCards:
     def set_possible_action(self, is_able_to_set_road: bool, is_able_to_set_ship: bool, is_able_to_set_town: bool, is_able_to_pick_development: bool, is_trade_not_done: bool):
         self.possible_actions = []
         # 街道建設
-        if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1 and is_able_to_set_road:
+        if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1 and is_able_to_set_road and self.road_count < 15:
             self.possible_actions.append((ActionType.SETROAD, self.actions[ActionType.SETROAD]))
         # 開拓地建設
         if self.resources[ResourceCardType.TREE] >= 1 and self.resources[ResourceCardType.BRICK] >= 1 and self.resources[ResourceCardType.SHEEP] >= 1 and self.resources[ResourceCardType.WHEAT] >= 1 and self.town_count != 5 and is_able_to_set_town:
@@ -341,8 +336,13 @@ class HandCards:
         self.possible_actions.append((ActionType.QUIT, self.actions[ActionType.QUIT]))
         self.crnt_action = "action"
         
-    def add_resources(self, resources_to_add: list[int]):
-        self.resources = [i+j for i, j in zip(self.resources, resources_to_add)]
+    def add_resources(self, resources_to_be_added: list[int]):
+        self.resources_already_get[:] = [i+j for i, j in zip(self.resources_already_get, resources_to_be_added)]
+        self.resources = [i+j for i, j in zip(self.resources, resources_to_be_added)]
+
+    def discard_resources(self, resources_to_be_discard: list[int]):
+        self.resources_already_get[:] = [i-j for i, j in zip(self.resources_already_get, resources_to_be_discard)]
+        self.resources = [i-j for i, j in zip(self.resources, resources_to_be_discard)]
 
     def set_resource_num_to_be_discarded(self):
         self.resource_num_to_be_discarded = sum(self.resources) // 2 if sum(self.resources) >= 8 else 0

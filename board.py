@@ -92,7 +92,7 @@ class Board:
             (-4,6),(0,6),(4,6)
         )
 
-        self.resources, self.numbers, self.developments = self.set_cards_and_numbers()
+        self.resource_by_space, self.number_by_space, self.developments = self.set_cards_and_numbers()
         self.vertex_details, self.edge_details = self.get_board_details()
 
         self.ports = {
@@ -117,7 +117,10 @@ class Board:
         self.towns_already_set: dict[tuple[int,int], int] = defaultdict(int)
         self.cities_already_set: dict[tuple[int,int], int] = defaultdict(int)
 
-        self.resources_to_get: list[int] = []
+        # 「発見」発展カードで取得する資源を管理するリスト
+        self.resources_to_get_by_plenty: list[int] = [0] * 5
+        # 今まで取得してきた「資源」カードの取得枚数を格納する
+        self.resources_already_get: list[int] = [0] * 5
 
         self.crnt_state = BoardState.SETFIRSTTOWN
 
@@ -125,10 +128,10 @@ class Board:
         self.player_list: list[HumanPlayer] = [HumanPlayer(i, self.get_first_possible_town_pos()) for i in range(4)]
 
         # 名前は後で変えられるようにする
-        self.hand_cards_by_player: tuple[HandCards] = (HandCards(pygame.Rect(10, 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[0], "Player 1"),
-                                                      HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[1], "Player 2"),
-                                                      HandCards(pygame.Rect(10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[2], "Player 3"),
-                                                      HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[3], "Player 4"))
+        self.hand_cards_by_player: tuple[HandCards] = (HandCards(pygame.Rect(10, 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[0], "Player 1", self.resources_already_get),
+                                                      HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[1], "Player 2", self.resources_already_get),
+                                                      HandCards(pygame.Rect(10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[2], "Player 3", self.resources_already_get),
+                                                      HandCards(pygame.Rect(self.SCREEN_WIDTH - self.HANDCARD_WIDTH - 10, self.SCREEN_HEIGHT - self.HANDCARD_HEIGHT - 10, self.HANDCARD_WIDTH, self.HANDCARD_HEIGHT), self.CHARA_COLOR[3], "Player 4", self.resources_already_get))
 
         # 交渉を2度行えないように、交渉が成立した時にこの変数をFalseにする
         self.is_trade_not_done: bool = True
@@ -167,17 +170,17 @@ class Board:
 
     def set_cards_and_numbers(self):
         """マスの資源と番号の配置を決める"""
-        resources = (
+        resource_by_space = (
             ["brick"]*3 + ["ore"]*3 +
             ["tree"]*4 + ["wheat"]*4 +
             ["sheep"]*4 + ["dessert"]
         )
-        random.shuffle(resources)
+        random.shuffle(resource_by_space)
 
-        numbers = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]
-        random.shuffle(numbers)
-        self.thief_pos_index = resources.index("dessert")
-        numbers.insert(self.thief_pos_index, 0)
+        number_by_space = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]
+        random.shuffle(number_by_space)
+        self.thief_pos_index = resource_by_space.index("dessert")
+        number_by_space.insert(self.thief_pos_index, 0)
 
         developments = (
             [DevelopmentCardType.KNIGHT]*14 +
@@ -189,7 +192,7 @@ class Board:
         random.shuffle(developments)
 
         # developmentsはdequeにするかどうか後で決める
-        return resources, numbers, developments
+        return resource_by_space, number_by_space, developments
     
     def get_board_details(self, isSea: bool = False):
         """頂点と辺の情報を取得する(どのマスに属しているかをインデックスを取得できるようにする)"""
@@ -197,13 +200,13 @@ class Board:
         edge_details: defaultdict[tuple[tuple[int,int], tuple[int,int]], dict[str, bool]] = defaultdict(lambda: {"road": False, "ship": False})
         edge_check_count: defaultdict[tuple[tuple[int,int], tuple[int,int]], int] = defaultdict(int)
 
-        for i in range(len(self.numbers)):
+        for i in range(len(self.number_by_space)):
             sx, sy = self.space_pos[i]
             for dindex, (dx, dy) in enumerate(self.VERTEX_DIR):
                 vertex_details[(sx+dx, sy+dy)].add(i)
                 ex, ey = self.VERTEX_DIR[(dindex+1)%6]
                 edge: tuple[tuple[int,int], tuple[int,int]] = tuple(sorted(((sx+dx, sy+dy), (sx+ex, sy+ey)), key=lambda x: x[1]))
-                if self.resources[i] == "sea":
+                if self.resource_by_space[i] == "sea":
                     edge_details[edge]["sea"] = True
                 else:
                     edge_details[edge]["road"] = True
@@ -244,43 +247,59 @@ class Board:
                 self.crnt_state = BoardState.DISCARD if any([hc.set_resource_num_to_be_discarded() for hc in self.hand_cards_by_player]) else BoardState.THIEF 
 
             elif dices_result:
-                hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.numbers) if n == dices_result]
-                resources = [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]
+                hit_space_pos: list[tuple[int, tuple[int,int]]] = [(i, self.space_pos[i]) for i, n in enumerate(self.number_by_space) if n == dices_result]
+                resources_to_be_added_by_player_list = [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]
+
                 for space_index, space_pos in hit_space_pos:
                     # ここは関数化するか後で考える
                     for vx, vy in self.VERTEX_DIR:
                         if (player_index := self.towns_already_set.get((space_pos[0]+vx, space_pos[1]+vy))) is not None:
-                            resource = self.resources[space_index]
+                            resource = self.resource_by_space[space_index]
                             if resource == "tree":
-                                resources[player_index][0] += 1
+                                resources_to_be_added_by_player_list[player_index][0] += 1
                             elif resource == "brick":
-                                resources[player_index][1] += 1
+                                resources_to_be_added_by_player_list[player_index][1] += 1
                             elif resource == "sheep":
-                                resources[player_index][2] += 1
+                                resources_to_be_added_by_player_list[player_index][2] += 1
                             elif resource == "wheat":
-                                resources[player_index][3] += 1
+                                resources_to_be_added_by_player_list[player_index][3] += 1
                             elif resource == "ore":
-                                resources[player_index][4] += 1
+                                resources_to_be_added_by_player_list[player_index][4] += 1
                             # 金脈の場合
                             else:
                                 pass
                         elif (player_index := self.cities_already_set.get((space_pos[0]+vx, space_pos[1]+vy))) is not None:
-                            resource = self.resources[space_index]
+                            resource = self.resource_by_space[space_index]
                             if resource == "tree":
-                                resources[player_index][0] += 2
+                                resources_to_be_added_by_player_list[player_index][0] += 2
                             elif resource == "brick":
-                                resources[player_index][1] += 2
+                                resources_to_be_added_by_player_list[player_index][1] += 2
                             elif resource == "sheep":
-                                resources[player_index][2] += 2
+                                resources_to_be_added_by_player_list[player_index][2] += 2
                             elif resource == "wheat":
-                                resources[player_index][3] += 2
+                                resources_to_be_added_by_player_list[player_index][3] += 2
                             elif resource == "ore":
-                                resources[player_index][4] += 2
+                                resources_to_be_added_by_player_list[player_index][4] += 2
                             # 金脈の場合
                             else:
                                 pass
-                for i, resources_by_player in enumerate(resources):
-                    self.hand_cards_by_player[i].add_resources(resources_by_player)
+                
+                resources_to_be_added_for_all_players = [sum(values) for values in zip(*resources_to_be_added_by_player_list)]
+                resources_cannot_be_added = [
+                    self.resources_already_get[i] == 19 or
+                    (
+                        self.resources_already_get[i] + resources_to_be_added_for_all_players[i] >= 19
+                        and sum(resource_to_be_added_by_player[i] > 0 for resource_to_be_added_by_player in resources_to_be_added_by_player_list) >= 2
+                    )
+                    for i in range(5)
+                ]
+
+                for i, cannot in enumerate(resources_cannot_be_added):
+                    if cannot:
+                        for player in resources_to_be_added_by_player_list:
+                            player[i] = 0
+                for player_index, resources_to_be_added_by_player in enumerate(resources_to_be_added_by_player_list):
+                    self.hand_cards_by_player[player_index].add_resources(resources_to_be_added_by_player)
 
                 self.set_board_state_to_action()
 
@@ -313,16 +332,16 @@ class Board:
         ]
         pygame.draw.polygon(
             self.screen,
-            self.RESOURCE_COLORS[self.resources[index]],
+            self.RESOURCE_COLORS[self.resource_by_space[index]],
             points
         )
         pygame.draw.polygon(self.screen, self.LINE_COLOR, points, 2)
 
         if index == self.thief_pos_index:
             self.screen.blit(self.thief_image, self.thief_image.get_rect(center=self.to_screen(center)))
-        elif self.numbers[index]:
+        elif self.number_by_space[index]:
             surf = self.font.render(
-                str(self.numbers[index]), True, self.NUMBER_COLOR
+                str(self.number_by_space[index]), True, self.NUMBER_COLOR
             )
             self.screen.blit(surf, surf.get_rect(center=self.to_screen(center)))
 
@@ -414,6 +433,7 @@ class Board:
     # 道を設置
     def set_road(self, edge: tuple[tuple[int,int], tuple[int,int]], player_index: int):
         self.ways_already_set[edge] = player_index
+        self.hand_cards_by_player[player_index].road_count += 1
         for player in self.player_list:
             player.possible_road_pos.discard(edge)
 
@@ -451,23 +471,23 @@ class Board:
                 self.set_board_state_to_action()
             elif self.crnt_state == BoardState.SETSECONDTOWN:
                 self.set_second_town(best_pos)
-                resources: list[int] = [0,0,0,0,0]
+                resources_to_be_added: list[int] = [0,0,0,0,0]
                 for space_index in self.vertex_details[best_pos]:
-                    if (resource := self.resources[space_index]) not in ("dessert", "sea"):
+                    if (resource := self.resource_by_space[space_index]) not in ("dessert", "sea"):
                         if resource == "tree":
-                            resources[0] += 1
+                            resources_to_be_added[0] += 1
                         elif resource == "brick":
-                            resources[1] += 1
+                            resources_to_be_added[1] += 1
                         elif resource == "sheep":
-                            resources[2] += 1
+                            resources_to_be_added[2] += 1
                         elif resource == "wheat":
-                            resources[3] += 1
+                            resources_to_be_added[3] += 1
                         elif resource == "ore":
-                            resources[4] += 1
+                            resources_to_be_added[4] += 1
                         # 金脈の場合
                         else:
                             pass
-                self.hand_cards_by_player[self.crnt_player_index].add_resources(resources)
+                self.hand_cards_by_player[self.crnt_player_index].add_resources(resources_to_be_added)
             else:
                 self.set_first_town(best_pos)
             self.get_longest_road()
@@ -609,6 +629,7 @@ class Board:
             for i, hand_card in enumerate(self.hand_cards_by_player):
                 if hand_card.change_resource_num_to_be_discarded(mouse_pos):
                     break
+            # 全てのプレイヤーが資源を捨て終わったら盗賊の移動に移る
             if all([hc.resource_num_to_be_discarded == 0 for hc in self.hand_cards_by_player]):
                 self.crnt_state = BoardState.THIEF
         elif self.crnt_state == BoardState.STEAL:
@@ -625,11 +646,11 @@ class Board:
         elif self.crnt_state == BoardState.PLENTY:
             if (resource_to_get := self.hand_cards_by_player[self.crnt_player_index].pick_resource_to_get_from_mouse(mouse_pos)) is None:
                 return
-            self.resources_to_get.append(resource_to_get)
-            if len(self.resources_to_get) == 2:
-                for resource_to_get in self.resources_to_get:
-                    self.hand_cards_by_player[self.crnt_player_index].resources[resource_to_get] += 1
-                self.resources_to_get = []
+            self.resources_to_get_by_plenty[resource_to_get] += 1
+            if sum(self.resources_to_get_by_plenty) == 2:
+                self.resources_to_get_by_plenty = [min(19-self.resources_already_get[i], self.resources_to_get_by_plenty[i]) for i in range(5)]
+                self.hand_cards_by_player[self.crnt_player_index].add_resources(self.resources_to_get_by_plenty)
+                self.resources_to_get_by_plenty = [0] * 5
                 self.set_board_state_to_action()
         elif self.crnt_state == BoardState.MONOPOLY:
             if (resource_to_get := self.hand_cards_by_player[self.crnt_player_index].pick_resource_to_get_from_mouse(mouse_pos)) is None:
