@@ -34,6 +34,7 @@ class Board:
     SCALEX, SCALEY = 30, 36
     SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
     HANDCARD_WIDTH, HANDCARD_HEIGHT = 360, 200
+    SPECIALCARD_WIDTH, SPECIALCARD_HEIGHT = 240, 180
 
     LINE_COLOR = (0,0,0)
     BG_COLOR = (0,174,239)
@@ -132,12 +133,22 @@ class Board:
         # 交渉を2度行えないように、交渉が成立した時にこの変数をFalseにする
         self.is_trade_not_done: bool = True
         # 2枚目の発展カードを使えないように、発展カードを使った時にこの変数をTrueにする
-        self.development_used: bool = False
+        self.is_development_used: bool = False
         # 最大騎士力を持っているプレイヤーと、その騎士カードの枚数
-        self.max_kinght_power_player: tuple[int, int] | None = None
+        self.max_knight_power_player: tuple[int, int] | None = None
+        # 最長経路のプレイヤー
+        self.max_length_player: int | None = None
 
         # サイコロ * 2 のインスタンス
         self.dices = Dices(pygame.Rect(self.SCREEN_WIDTH*5/12,self.SCREEN_HEIGHT*5/12,self.SCREEN_WIDTH*1/6,self.SCREEN_HEIGHT*1/6))
+
+        # 最大騎士力と最長経路の所持者を表示する領域
+        self.special_cards_surface = pygame.Surface(
+            (self.SPECIALCARD_WIDTH, self.SPECIALCARD_HEIGHT), pygame.SRCALPHA)
+
+        self.max_length_image = ImageManager.load("max_length")
+        self.max_knight_power_image = ImageManager.load("max_knight_power")
+        self.thief_image = ImageManager.load("thief")
         
     def get_first_possible_town_pos(self):
         """最初に置ける開拓地の場所を取得"""
@@ -277,6 +288,21 @@ class Board:
         for hand_cards in self.hand_cards_by_player:
             hand_cards.draw(self.screen)
 
+        self.screen.blit(self.special_cards_surface, (self.SCREEN_WIDTH-self.SPECIALCARD_WIDTH-10, (self.SCREEN_HEIGHT-self.SPECIALCARD_HEIGHT)//2))
+        self.special_cards_surface.fill((150,150,150))
+
+        self.special_cards_surface.blit(self.max_length_image, self.max_length_image.get_rect(center=(self.SPECIALCARD_WIDTH//4, self.SPECIALCARD_HEIGHT//2)))
+        max_length_surf = self.font.render(
+            self.hand_cards_by_player[self.max_length_player].player_name if self.max_length_player is not None else "---", True, self.CHARA_COLOR[self.max_length_player] if self.max_length_player is not None else self.LINE_COLOR
+        )
+        self.special_cards_surface.blit(max_length_surf, max_length_surf.get_rect(center=(self.SPECIALCARD_WIDTH//4, self.SPECIALCARD_HEIGHT//2+60)))
+        
+        self.special_cards_surface.blit(self.max_knight_power_image, self.max_knight_power_image.get_rect(center=(self.SPECIALCARD_WIDTH*3//4, self.SPECIALCARD_HEIGHT//2)))
+        max_knight_power_surf = self.font.render(
+            self.hand_cards_by_player[self.max_knight_power_player[0]].player_name if self.max_knight_power_player is not None else "---", True, self.CHARA_COLOR[self.max_knight_power_player[0]] if self.max_knight_power_player is not None else self.LINE_COLOR
+        )
+        self.special_cards_surface.blit(max_knight_power_surf, max_knight_power_surf.get_rect(center=(self.SPECIALCARD_WIDTH*3//4, self.SPECIALCARD_HEIGHT//2+60)))
+        
         pygame.display.flip()
 
     # 六角形マスの描画
@@ -293,8 +319,7 @@ class Board:
         pygame.draw.polygon(self.screen, self.LINE_COLOR, points, 2)
 
         if index == self.thief_pos_index:
-            img = ImageManager.load("thief")
-            self.screen.blit(img, img.get_rect(center=self.to_screen(center)))
+            self.screen.blit(self.thief_image, self.thief_image.get_rect(center=self.to_screen(center)))
         elif self.numbers[index]:
             surf = self.font.render(
                 str(self.numbers[index]), True, self.NUMBER_COLOR
@@ -445,6 +470,7 @@ class Board:
                 self.hand_cards_by_player[self.crnt_player_index].add_resources(resources)
             else:
                 self.set_first_town(best_pos)
+            self.get_longest_road()
             return True
         
         return False
@@ -532,6 +558,7 @@ class Board:
                 if len(self.player_list[self.crnt_player_index].possible_road_pos) + len(self.player_list[self.crnt_player_index].possible_ship_pos) == 0:
                     self.set_board_state_to_action()
                 self.crnt_state = BoardState.SETROAD
+            self.get_longest_road()
             return True
         
         return False
@@ -562,6 +589,9 @@ class Board:
                 is_steal = False
                 for dx, dy in self.VERTEX_DIR:
                     if (player_index := self.towns_already_set.get((sx+dx, sy+dy))) not in (None, self.crnt_player_index):
+                        self.hand_cards_by_player[player_index].crnt_action = "stolen"
+                        is_steal = True
+                    elif (player_index := self.cities_already_set.get((sx+dx, sy+dy))) not in (None, self.crnt_player_index):
                         self.hand_cards_by_player[player_index].crnt_action = "stolen"
                         is_steal = True
 
@@ -646,23 +676,25 @@ class Board:
                 elif action_type == ActionType.TRADE:
                     self.crnt_state = BoardState.TRADE
                 elif action_type == ActionType.QUIT:
+                    self.is_development_used = False
+                    self.is_trade_not_done = True
                     self.crnt_player_index = (self.crnt_player_index + 1) % 4
                     self.crnt_state = BoardState.ROLLDICE
 
-            if action_type is not None or self.development_used:
+            if action_type is not None or self.is_development_used:
                 return
             
             if (development_type := self.hand_cards_by_player[self.crnt_player_index].pick_development_from_mouse(mouse_pos)) is not None:
                 if development_type == DevelopmentCardType.KNIGHT:
-                    crnt_kinght_power = self.hand_cards_by_player[self.crnt_player_index].developments_used[DevelopmentCardType.KNIGHT]
-                    if self.max_kinght_power_player is not None:
-                        if crnt_kinght_power > self.max_kinght_power_player[1]:
-                            self.hand_cards_by_player[self.crnt_player_index].is_max_kinght_power = True
-                            self.hand_cards_by_player[self.max_kinght_power_player[0]].is_max_kinght_power = False
-                            self.max_kinght_power_player = (self.crnt_player_index, crnt_kinght_power)
-                    elif crnt_kinght_power == 3:
-                        self.hand_cards_by_player[self.crnt_player_index].is_max_kinght_power = True
-                        self.max_kinght_power_player = (self.crnt_player_index, crnt_kinght_power)
+                    crnt_knight_power = self.hand_cards_by_player[self.crnt_player_index].developments_used[DevelopmentCardType.KNIGHT]
+                    if self.max_knight_power_player is not None:
+                        if crnt_knight_power > self.max_knight_power_player[1]:
+                            self.hand_cards_by_player[self.crnt_player_index].is_max_knight_power = True
+                            self.hand_cards_by_player[self.max_knight_power_player[0]].is_max_knight_power = False
+                            self.max_knight_power_player = (self.crnt_player_index, crnt_knight_power)
+                    elif crnt_knight_power == 3:
+                        self.hand_cards_by_player[self.crnt_player_index].is_max_knight_power = True
+                        self.max_knight_power_player = (self.crnt_player_index, crnt_knight_power)
                     self.crnt_state = BoardState.THIEF
                 elif development_type == DevelopmentCardType.ROAD:
                     # 使っても道を配置できない状況なら無効となる
@@ -676,7 +708,7 @@ class Board:
                 else:
                     self.crnt_state = BoardState.MONOPOLY
 
-                self.development_used = True
+                self.is_development_used = True
             
     def start_dice_rolling(self, mouse_pos: tuple[int,int]):
         if self.crnt_state != BoardState.ROLLDICE:
@@ -779,3 +811,55 @@ class Board:
             len(self.developments) != 0,
             self.is_trade_not_done
             )
+        
+    def get_longest_road(self):
+        vertices_list: list[set[tuple[int,int]]] = [set() for _ in range(4)]
+        ways_list: list[set[tuple[tuple[int,int],tuple[int,int]]]] = [set() for _ in range(4)]
+        for edge, player_index in self.ways_already_set.items():
+            v1, v2 = edge
+            ways_list[player_index].add(edge)
+            vertices_list[player_index].add(v1)
+            vertices_list[player_index].add(v2)
+
+        max_length_list = [0] * 4
+        for player_index, vertices in enumerate(vertices_list):
+            for v in vertices:
+                length = self.longest_path_from(v, ways_list[player_index], set(), player_index)
+                max_length_list[player_index] = max(max_length_list[player_index], length)
+
+        max_length = max(max_length_list)
+        if max_length < 5:
+            if self.max_length_player is not None:
+                self.hand_cards_by_player[self.max_length_player].is_max_length = False
+                self.max_length_player = None
+            return
+        
+        max_length_player_index = [i for i, l in enumerate(max_length_list) if l == max_length]
+        if self.max_length_player is None:
+            self.max_length_player = self.crnt_player_index
+            self.hand_cards_by_player[self.max_length_player].is_max_length = True
+        elif self.max_length_player not in max_length_player_index:
+            self.hand_cards_by_player[self.max_length_player].is_max_length = False
+            self.max_length_player = self.crnt_player_index
+            self.hand_cards_by_player[self.max_length_player].is_max_length = True
+            
+    def longest_path_from(self, vertex: tuple[int,int], ways: set[tuple[tuple[int,int],tuple[int,int]]], visited_edges: set[tuple[tuple[int,int],tuple[int,int]]], player_index: int):
+        max_length = 0
+        
+        for edge in ways:
+            if edge not in visited_edges and vertex in edge:
+                next_vertex = edge[1] if edge[0] == vertex else edge[0]
+                if (self.towns_already_set.get(next_vertex) in (None, player_index)
+                    or self.cities_already_set.get(next_vertex) in (None, player_index)):
+                    length = 1 + self.longest_path_from(
+                        next_vertex,
+                        ways,
+                        visited_edges | {edge},
+                        player_index
+                    )
+                else:
+                    length = 1
+                max_length = max(max_length, length)
+
+        return max_length
+

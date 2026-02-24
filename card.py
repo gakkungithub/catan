@@ -43,7 +43,8 @@ class HandCards:
         self.developments_got_now = [0] * 5
         self.developments_used = [0] * 5
 
-        self.is_max_kinght_power = False
+        self.is_max_knight_power = False
+        self.is_max_length = False
 
         self.town_count = 0
         self.city_count = 0
@@ -99,7 +100,7 @@ class HandCards:
         self.card_surface.blit(surf, surf.get_rect(topleft=(10, 10)))
 
         # 現在の得点の表示
-        surf = self.font.render(f"{self.town_count + self.city_count * 2 + self.developments[4] + self.is_max_kinght_power * 2} / 10", True, self.color)
+        surf = self.font.render(f"{self.town_count + self.city_count * 2 + self.developments[4] + self.is_max_knight_power * 2 + self.is_max_length * 2} / 10", True, self.color)
         self.card_surface.blit(surf, surf.get_rect(topright=(self.card_width-10, 10)))
 
         # 資源カードの表示
@@ -140,8 +141,6 @@ class HandCards:
             if self.developments_used[i]:
                 surf = self.button_font.render(str(self.developments_used[i]), True, self.color)
                 self.card_surface.blit(surf, surf.get_rect(center=(40+50*i, 190)))
-                if i == DevelopmentCardType.KNIGHT and self.is_max_kinght_power:
-                    pygame.draw.circle(self.card_surface, self.color, (40+50*i, 190), 8, 2)
 
         if self.crnt_action == "action":
             self.action_surface.fill((255,255,255))
